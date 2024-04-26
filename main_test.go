@@ -8,15 +8,13 @@ import (
 	"github.com/alecthomas/participle/v2"
 )
 
-// TODO: add builtin function
-// TODO: add function call
 // TODO: add user function
 // TODO: add global env
 // TODO: add entry main function call
 
 const program = `{
 	(var result = {
-		(break 12)
+		(break (itof 12))
 	})
 }`
 

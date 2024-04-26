@@ -64,14 +64,16 @@ var (
 		participle.Lexer(Lexer),
 		participle.UseLookahead(1),
 		participle.Union[BlockNodeUnion](
-			&BreakNode{},
 			&VariableNode{},
 			&SetNode{},
+			&BreakNode{},
 			&OperaitonNode{},
+			&CallNode{},
 		),
 		participle.Union[ExpressionNodeUnion](
 			&BlockNode{},
 			&OperaitonNode{},
+			&CallNode{},
 			&SymbolNode{},
 			&IntegerNode{},
 			&FloatNode{},
@@ -91,6 +93,12 @@ type (
 	OperaitonNode       struct {
 		Pos           lexer.Position
 		Operation     string                `parser:"'(' @('+'|'-'|'*'|'/')"`
+		Arguments     []ExpressionNodeUnion `parser:"@@+ ')'"`
+		OperationType Type
+	}
+	CallNode struct {
+		Pos           lexer.Position
+		Call          *SymbolNode           `parser:"'(' @@"`
 		Arguments     []ExpressionNodeUnion `parser:"@@+ ')'"`
 		OperationType Type
 	}
@@ -133,6 +141,7 @@ const (
 	FloatNK
 	SymbolNK
 	OperationNK
+	CallNK
 	VariableNK
 	SetNK
 	BlockNK
@@ -146,6 +155,9 @@ func (node *FloatNode) Position() lexer.Position {
 	return node.Pos
 }
 func (node *OperaitonNode) Position() lexer.Position {
+	return node.Pos
+}
+func (node *CallNode) Position() lexer.Position {
 	return node.Pos
 }
 func (node *SymbolNode) Position() lexer.Position {
@@ -172,6 +184,9 @@ func (*FloatNode) Kind() NodeKind {
 }
 func (*OperaitonNode) Kind() NodeKind {
 	return OperationNK
+}
+func (*CallNode) Kind() NodeKind {
+	return CallNK
 }
 func (*SymbolNode) Kind() NodeKind {
 	return SymbolNK
@@ -265,6 +280,33 @@ func Semantic(state *State, node Node) (Type, error) {
 			return nil, err
 		}
 		return expType, nil
+	case *CallNode:
+		callType, err := Semantic(state, node.Call)
+		if err != nil {
+			return nil, err
+		}
+		fnType, ok := callType.(*FuncType)
+		if !ok {
+			return nil, fmt.Errorf("can't call not function symbol, got %s", callType.Inspect())
+		}
+		if len(fnType.Inputs) != len(node.Arguments) {
+			return nil, fmt.Errorf("can't call func, expect %d inputs, got %d", len(fnType.Inputs), len(node.Arguments))
+		}
+		for index := range node.Arguments {
+			inputItem := node.Arguments[index]
+			inputType, err := Semantic(state, inputItem)
+			if err != nil {
+				return nil, err
+			}
+			if inputType == nil {
+				return nil, fmt.Errorf("can't get input type #%d", index)
+			}
+			expectedInputType := fnType.Inputs[index]
+			if !CompareTypes(expectedInputType, inputType) {
+				return nil, fmt.Errorf("can't call func, #%d input type mismatched", index)
+			}
+		}
+		return fnType.Output, nil
 	case *OperaitonNode:
 		if len(node.Arguments) < 2 {
 			return nil, fmt.Errorf("semantic error: operation '%s' expects minimum 2 inputs, got %d", node.Operation, len(node.Arguments))
@@ -307,12 +349,17 @@ type (
 	}
 	IntegerType struct{}
 	FloatType   struct{}
+	FuncType    struct {
+		Inputs []Type
+		Output Type
+	}
 )
 
 const (
 	IllegalTK TypeKind = iota
 	IntegerTK
 	FloatTK
+	FuncTK
 )
 
 func (*IntegerType) Kind() TypeKind {
@@ -321,6 +368,9 @@ func (*IntegerType) Kind() TypeKind {
 func (*FloatType) Kind() TypeKind {
 	return FloatTK
 }
+func (*FuncType) Kind() TypeKind {
+	return FuncTK
+}
 
 func (*IntegerType) Inspect() string {
 	return "int"
@@ -328,9 +378,21 @@ func (*IntegerType) Inspect() string {
 func (*FloatType) Inspect() string {
 	return "float"
 }
+func (tp *FuncType) Inspect() string {
+	inputs := []string{}
+	for index := range tp.Inputs {
+		inputItem := tp.Inputs[index]
+		inputs = append(inputs, inputItem.Inspect())
+	}
+	out := "void"
+	if tp.Output != nil {
+		out = tp.Output.Inspect()
+	}
+	return fmt.Sprintf("fn[%s]<%s>", strings.Join(inputs, " "), out)
+}
 
 func CompareTypes(first, second Type) bool {
-	return first.Kind() == second.Kind()
+	return first.Inspect() == second.Inspect()
 }
 
 func IsNumberType(dt Type) bool {
@@ -358,8 +420,27 @@ type Enviroment struct {
 
 func NewCoreEnviroment() *Enviroment {
 	return &Enviroment{
-		Scope:   "core",
-		Symbols: map[string]Symbol{},
+		Scope: "core",
+		Symbols: map[string]Symbol{
+			"itof": &BuiltinSymbol{
+				Ident: "itof",
+				Typ: &FuncType{
+					Inputs: []Type{
+						&IntegerType{},
+					},
+					Output: &FloatType{},
+				},
+				Callee: func(v ...Value) (Value, error) {
+					if len(v) != 1 {
+						return nil, fmt.Errorf("can't call 'itof', expect 1 argument, got %d", len(v))
+					}
+					value := v[0].(IntegerValue)
+					return FloatValue{
+						Value: float64(value.Value),
+					}, nil
+				},
+			},
+		},
 	}
 }
 
@@ -424,6 +505,11 @@ type (
 		Typ   Type
 		Val   Value
 	}
+	BuiltinSymbol struct {
+		Ident  string
+		Typ    Type
+		Callee func(...Value) (Value, error)
+	}
 )
 
 const (
@@ -452,6 +538,22 @@ func (sm *VariableSymbol) Inspect() string {
 		return fmt.Sprintf("%s -> var %s", sm.Ident.Value, sm.Typ.Inspect())
 	}
 	return fmt.Sprintf("%s -> var", sm.Ident.Value)
+}
+
+func (*BuiltinSymbol) Kind() SymbolKind {
+	return FunctionSK
+}
+func (sm *BuiltinSymbol) Name() string {
+	return sm.Ident
+}
+func (sm *BuiltinSymbol) Value() Value {
+	return nil
+}
+func (sm *BuiltinSymbol) Type() Type {
+	return sm.Typ
+}
+func (sm *BuiltinSymbol) Inspect() string {
+	return fmt.Sprintf("%s -> builtin %s", sm.Ident, sm.Typ.Inspect())
 }
 
 // Evaluation
@@ -534,6 +636,30 @@ func Eval(state *State, node Node) (Value, error) {
 			return nil, err
 		}
 		return val, nil
+	case *CallNode:
+		values := []Value{}
+		for index := range node.Arguments {
+			input := node.Arguments[index]
+			value, err := Eval(state, input)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		symb := state.Env.LookupAll(node.Call.Value)
+		if symb == nil {
+			return nil, fmt.Errorf("symbol '%s' not found", node.Call.Value)
+		}
+		switch symb := symb.(type) {
+		case *BuiltinSymbol:
+			res, err := symb.Callee(values...)
+			if err != nil {
+				return nil, err
+			}
+			return res, nil
+		default:
+			return nil, fmt.Errorf("can't set value to '%s': expect variable symbol", symb.Name())
+		}
 	case *OperaitonNode:
 		values := []Value{}
 		for index := range node.Arguments {
