@@ -8,7 +8,11 @@ import (
 	"github.com/alecthomas/participle/v2"
 )
 
-const program = `(def test 12)`
+const program = `{
+	(def a 12)
+	(def b (* a a))
+	(+ a b)
+}`
 
 func TestInterpreter(t *testing.T) {
 	var errBuf bytes.Buffer
@@ -18,7 +22,7 @@ func TestInterpreter(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainEnv := NewEnviroment("main_global", nil)
-	resTyp, err := TypeChecker(mainEnv, resNode)
+	resTyp, err := TypeChecke(mainEnv, resNode)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -60,17 +60,26 @@ var (
 
 			{Name: "(", Pattern: `\(`},
 			{Name: ")", Pattern: `\)`},
+			{Name: "{", Pattern: `{`},
+			{Name: "}", Pattern: `}`},
 		},
 		"String": {
 			{Name: "StringEnd", Pattern: `"`, Action: lexer.Pop()},
 			{Name: "String", Pattern: `(\\"|[^"])*`},
 		},
 	})
-	Parser = participle.MustBuild[DefNode](
+	Parser = participle.MustBuild[BlockNode](
 		participle.Lexer(Lexer),
 		participle.UseLookahead(1),
-		participle.Union[ExpressionNode](
+		participle.Union[BlockUnionNode](
+			&UnitNode{},
 			&OperationNode{},
+			&DefNode{},
+		),
+		participle.Union[ExpressionUnionNode](
+			&BlockNode{},
+			&OperationNode{},
+			&SymbolNode{},
 			&IntegerNode{},
 			&FloatNode{},
 			&BoolNode{},
@@ -84,22 +93,33 @@ type (
 	Node interface {
 		Position() lexer.Position
 	}
-	ExpressionNode interface{ Node }
-	_node          struct {
+	ExpressionUnionNode interface{ Node }
+	BlockUnionNode      interface{ Node }
+	_node               struct {
 		Pos lexer.Position
+	}
+	BlockNode struct {
+		_node
+		Body       []BlockUnionNode `parser:"'{' @@+ '}'"`
+		ReturnType Type
+		Env        Enviroment
 	}
 	OperationNode struct {
 		_node
-		Operation     string           `parser:"'(' @('+'|'-'|'*'|'/'|'<'|'='|'<>'|'>'|'<='|'>='|'|'|'&'|'++')"`
-		Operands      []ExpressionNode `parser:"@@ @@+ ')'"`
+		Operation     string                `parser:"'(' @('+'|'-'|'*'|'/'|'<'|'='|'<>'|'>'|'<='|'>='|'|'|'&'|'++')"`
+		Operands      []ExpressionUnionNode `parser:"@@ @@+ ')'"`
 		OperationType Type
 		OperandsType  Type
 	}
 	DefNode struct {
 		_node
-		Identifier  string         `parser:"'(' 'def' @Symbol"`
-		Content     ExpressionNode `parser:"@@ ')'"`
+		Identifier  *SymbolNode         `parser:"'(' 'def' @@"`
+		Content     ExpressionUnionNode `parser:"@@ ')'"`
 		ContentType Type
+	}
+	SymbolNode struct {
+		_node
+		Value string `parser:"@Symbol"`
 	}
 	IntegerNode struct {
 		_node
@@ -139,8 +159,12 @@ func InspectNode(node Node) string {
 		return "bool_node"
 	case *StringNode:
 		return "string_node"
+	case *SymbolNode:
+		return "symbol_node"
 	case *DefNode:
 		return "def_node"
+	case *BlockNode:
+		return "block_node"
 	case *OperationNode:
 		return fmt.Sprintf("operation_%s", node.Operation)
 	default:
@@ -152,7 +176,7 @@ func InspectNode(node Node) string {
 
 type Enviroment struct {
 	Name    string
-	Symbols map[string]Symbol
+	Symbols map[string]*Symbol
 	Parent  *Enviroment
 }
 
@@ -160,20 +184,20 @@ func NewEnviroment(name string, parent *Enviroment) *Enviroment {
 	return &Enviroment{
 		Name:    name,
 		Parent:  parent,
-		Symbols: map[string]Symbol{},
+		Symbols: map[string]*Symbol{},
 	}
 }
 
-func (env *Enviroment) Insert(sm Symbol) error {
-	ident := SymbolIdentifier(sm)
-	_, ok := env.Symbols[ident]
-	if !ok {
-		return fmt.Errorf("symbol '%s' already exists in enviroment %s", ident, env.Name)
+func (env *Enviroment) Insert(sm *Symbol) error {
+	_, ok := env.Symbols[sm.Ident.Value]
+	if ok {
+		return fmt.Errorf("symbol '%s' already exists in enviroment %s", sm.Ident.Value, env.Name)
 	}
+	env.Symbols[sm.Ident.Value] = sm
 	return nil
 }
 
-func (env *Enviroment) Lookup(ident string) (Symbol, error) {
+func (env *Enviroment) Lookup(ident string) (*Symbol, error) {
 	sm, ok := env.Symbols[ident]
 	if !ok {
 		return nil, fmt.Errorf("symbol '%s' not found in enviroment %s", ident, env.Name)
@@ -181,7 +205,7 @@ func (env *Enviroment) Lookup(ident string) (Symbol, error) {
 	return sm, nil
 }
 
-func (env *Enviroment) LookupAll(ident string) (Symbol, error) {
+func (env *Enviroment) LookupAll(ident string) (*Symbol, error) {
 	sm, err := env.Lookup(ident)
 	if err == nil {
 		return sm, nil
@@ -203,36 +227,15 @@ func (env *Enviroment) Inspect() string {
 // Symbol
 
 type (
-	Symbol interface {
-		symbol()
-	}
-	_symbol  struct{}
-	Variable struct {
-		_symbol
-		Identifier string
-		Type       Type
-		Value      Value
+	Symbol struct {
+		Ident *SymbolNode
+		Type  Type
+		Value Value
 	}
 )
 
-func (*_symbol) symbol() {}
-
-func SymbolIdentifier(sm Symbol) string {
-	switch sm := sm.(type) {
-	case *Variable:
-		return sm.Identifier
-	default:
-		return ""
-	}
-}
-
-func InspectSymbol(sm Symbol) string {
-	switch sm := sm.(type) {
-	case *Variable:
-		return fmt.Sprintf("%s -> var %s", sm.Identifier, InspectType(sm.Type))
-	default:
-		return "invalid_symbol"
-	}
+func InspectSymbol(sm *Symbol) string {
+	return fmt.Sprintf("%s -> %s", sm.Ident.Value, InspectType(sm.Type))
 }
 
 // Value
@@ -384,6 +387,14 @@ type (
 
 func (*_type) tp() {}
 
+var types = map[string]Type{
+	"unit":   &UnitType{},
+	"int":    &IntegerType{},
+	"float":  &FloatType{},
+	"bool":   &BoolType{},
+	"string": &StringType{},
+}
+
 func InspectType(typ Type) string {
 	switch typ.(type) {
 	case *UnitType:
@@ -414,44 +425,80 @@ func IsComparableType(a Type) bool {
 }
 
 func IsBooleanType(a Type) bool {
-	return CompareTypes(&BoolType{}, a)
+	return CompareTypes(types["bool"], a)
 }
 
 func IsStringType(a Type) bool {
-	return CompareTypes(&StringType{}, a)
+	return CompareTypes(types["string"], a)
 }
 
 func IsIntegerType(a Type) bool {
-	return CompareTypes(&IntegerType{}, a)
+	return CompareTypes(types["int"], a)
 }
 
 func IsFloatType(a Type) bool {
-	return CompareTypes(&FloatType{}, a)
+	return CompareTypes(types["float"], a)
+}
+
+func isUnitType(a Type) bool {
+	return CompareTypes(types["unit"], a)
 }
 
 // Type checking
 
-func TypeChecker(env *Enviroment, node Node) (Type, error) {
+func TypeChecke(env *Enviroment, node Node) (Type, error) {
 	switch node := node.(type) {
 	case *IntegerNode:
-		return &IntegerType{}, nil
+		return types["int"], nil
 	case *FloatNode:
-		return &FloatType{}, nil
+		return types["float"], nil
 	case *BoolNode:
-		return &BoolType{}, nil
+		return types["bool"], nil
 	case *StringNode:
-		return &StringType{}, nil
+		return types["string"], nil
 	case *UnitNode:
-		return &UnitType{}, nil
+		return types["unit"], nil
+	case *SymbolNode:
+		sm, err := env.LookupAll(node.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return sm.Type, nil
 	case *DefNode:
-		contType, err := TypeChecker(env, node.Content)
+		contType, err := TypeChecke(env, node.Content)
 		if err != nil {
 			return nil, err
 		}
+		if isUnitType(contType) {
+			return nil, fmt.Errorf("%s -> can't assign unit type to symbol '%s'", node.Position(), node.Identifier.Value)
+		}
 		node.ContentType = contType
-		return &UnitType{}, nil
+		err = env.Insert(
+			&Symbol{
+				Ident: node.Identifier,
+				Type:  node.ContentType,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return types["unit"], nil
+	case *BlockNode:
+		blockEnv := NewEnviroment("block", env)
+		for index, content := range node.Body {
+			typ, err := TypeChecke(blockEnv, content)
+			if err != nil {
+				return nil, err
+			}
+			if index == len(node.Body)-1 {
+				node.ReturnType = typ
+			}
+		}
+		node.Env = *blockEnv
+		fmt.Println(blockEnv.Inspect())
+		return node.ReturnType, nil
 	case *OperationNode:
-		opTyp, err := TypeChecker(env, node.Operands[0])
+		opTyp, err := TypeChecke(env, node.Operands[0])
 		if err != nil {
 			return nil, err
 		}
@@ -467,7 +514,7 @@ func TypeChecker(env *Enviroment, node Node) (Type, error) {
 			if !IsComparableType(opTyp) {
 				return nil, fmt.Errorf("%s -> can't use not comparable type in '%s' operation", node.Position(), node.Operation)
 			}
-			node.OperationType = &BoolType{}
+			node.OperationType = types["bool"]
 			return TypeCheckOperatorOperands(env, node)
 		case "|", "&":
 			if !IsBooleanType(opTyp) {
@@ -491,7 +538,7 @@ func TypeChecker(env *Enviroment, node Node) (Type, error) {
 
 func TypeCheckOperatorOperands(env *Enviroment, node *OperationNode) (Type, error) {
 	for index, operand := range node.Operands {
-		typ, err := TypeChecker(env, operand)
+		typ, err := TypeChecke(env, operand)
 		if err != nil {
 			return nil, err
 		}
@@ -535,12 +582,36 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		return StringValue{
 			Value: node.Value,
 		}, nil
+	case *SymbolNode:
+		sm, err := env.LookupAll(node.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return sm.Value, nil
 	case *DefNode:
-		_, err := Eval(env, node.Content)
+		val, err := Eval(env, node.Content)
 		if err != nil {
 			return nil, err
 		}
+		sm, err := env.Lookup(node.Identifier.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		sm.Value = val
 		return UnitValue{}, nil
+	case *BlockNode:
+		blockEnv := node.Env
+		retVal := Value(UnitValue{})
+		for index, content := range node.Body {
+			val, err := Eval(&blockEnv, content)
+			if err != nil {
+				return nil, err
+			}
+			if index == len(node.Body)-1 {
+				retVal = val
+			}
+		}
+		return retVal, nil
 	case *OperationNode:
 		operands := []Value{}
 		for _, operand := range node.Operands {
@@ -554,7 +625,7 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		case *IntegerType:
 			values, err := ValuesToInteger(operands...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 			}
 			switch node.Operation {
 			case "+":
@@ -583,7 +654,7 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		case *FloatType:
 			values, err := ValuesToFloat(operands...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 			}
 			switch node.Operation {
 			case "+":
@@ -612,7 +683,7 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		case *BoolType:
 			values, err := ValuesToBool(operands...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 			}
 			switch node.Operation {
 			case "=":
@@ -629,7 +700,7 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		case *StringType:
 			values, err := ValuesToString(operands...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 			}
 			switch node.Operation {
 			case "=":
