@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
@@ -21,7 +22,6 @@ Language structure
 3. Compile:
 	Input -> annotated AST
 	Output ->
-		| Golang code
 		| Bytecode
 
 4. Runtime:
@@ -35,10 +35,12 @@ var (
 		"Root": []lexer.Rule{
 			{Name: "wspace", Pattern: `[ \r\t\n]+`},
 
+			{Name: "StringStart", Pattern: `"`, Action: lexer.Push("String")},
 			{Name: "Boolean", Pattern: `(true|false)`},
 			{Name: "Float", Pattern: `-?[0-9]+\.[0-9]*`},
 			{Name: "Integer", Pattern: `-?[0-9]+`},
 
+			{Name: "++", Pattern: `\+\+`},
 			{Name: "+", Pattern: `\+`},
 			{Name: "-", Pattern: `-`},
 			{Name: "*", Pattern: `\*`},
@@ -55,6 +57,10 @@ var (
 			{Name: "(", Pattern: `\(`},
 			{Name: ")", Pattern: `\)`},
 		},
+		"String": {
+			{Name: "StringEnd", Pattern: `"`, Action: lexer.Pop()},
+			{Name: "String", Pattern: `(\\"|[^"])*`},
+		},
 	})
 	Parser = participle.MustBuild[OperationNode](
 		participle.Lexer(Lexer),
@@ -64,6 +70,7 @@ var (
 			&IntegerNode{},
 			&FloatNode{},
 			&BoolNode{},
+			&StringNode{},
 		),
 	)
 )
@@ -79,7 +86,7 @@ type (
 	}
 	OperationNode struct {
 		_node
-		Operation     string           `parser:"'(' @('+'|'-'|'*'|'/'|'<'|'='|'<>'|'>'|'<='|'>='|'|'|'&')"`
+		Operation     string           `parser:"'(' @('+'|'-'|'*'|'/'|'<'|'='|'<>'|'>'|'<='|'>='|'|'|'&'|'++')"`
 		Operands      []ExpressionNode `parser:"@@ @@+ ')'"`
 		OperationType Type
 		OperandsType  Type
@@ -95,6 +102,10 @@ type (
 	BoolNode struct {
 		_node
 		Value string `parser:"@Boolean"`
+	}
+	StringNode struct {
+		_node
+		Value string `parser:"StringStart @String StringEnd"`
 	}
 )
 
@@ -136,6 +147,10 @@ type (
 		_value
 		Value bool
 	}
+	StringValue struct {
+		_value
+		Value string
+	}
 )
 
 func (_value) value() {}
@@ -148,9 +163,31 @@ func InspectValue(value Value) string {
 		return fmt.Sprintf("%f", value.Value)
 	case BoolValue:
 		return fmt.Sprintf("%v", value.Value)
+	case StringValue:
+		return fmt.Sprintf("\"%s\"", value.Value)
 	default:
 		return "invalid_value"
 	}
+}
+
+func ValueToString(value Value) (StringValue, error) {
+	val, ok := value.(StringValue)
+	if !ok {
+		return StringValue{}, fmt.Errorf("can't convert value to string")
+	}
+	return val, nil
+}
+
+func ValuesToString(values ...Value) ([]StringValue, error) {
+	res := []StringValue{}
+	for _, val := range values {
+		str, err := ValueToString(val)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, str)
+	}
+	return res, nil
 }
 
 func ValueToInteger(value Value) (IntegerValue, error) {
@@ -176,7 +213,7 @@ func ValuesToInteger(values ...Value) ([]IntegerValue, error) {
 func ValueToFloat(value Value) (FloatValue, error) {
 	val, ok := value.(FloatValue)
 	if !ok {
-		return FloatValue{}, fmt.Errorf("can't convert value to integer")
+		return FloatValue{}, fmt.Errorf("can't convert value to float")
 	}
 	return val, nil
 }
@@ -223,6 +260,7 @@ type (
 	IntegerType struct{ _type }
 	FloatType   struct{ _type }
 	BoolType    struct{ _type }
+	StringType  struct{ _type }
 )
 
 func (*_type) tp() {}
@@ -235,6 +273,8 @@ func InspectType(typ Type) string {
 		return "float"
 	case *BoolType:
 		return "bool"
+	case *StringType:
+		return "string"
 	default:
 		return "illigal"
 	}
@@ -245,15 +285,27 @@ func CompareTypes(a, b Type) bool {
 }
 
 func IsNumberType(a Type) bool {
-	return CompareTypes(&IntegerType{}, a) || CompareTypes(&FloatType{}, a)
+	return IsIntegerType(a) || IsFloatType(a)
 }
 
 func IsComparableType(a Type) bool {
-	return IsNumberType(a) || IsBooleanType(a)
+	return IsNumberType(a) || IsBooleanType(a) || IsStringType(a)
 }
 
 func IsBooleanType(a Type) bool {
 	return CompareTypes(&BoolType{}, a)
+}
+
+func IsStringType(a Type) bool {
+	return CompareTypes(&StringType{}, a)
+}
+
+func IsIntegerType(a Type) bool {
+	return CompareTypes(&IntegerType{}, a)
+}
+
+func IsFloatType(a Type) bool {
+	return CompareTypes(&FloatType{}, a)
 }
 
 // Type checking
@@ -266,32 +318,38 @@ func TypeChecker(node Node) (Type, error) {
 		return &FloatType{}, nil
 	case *BoolNode:
 		return &BoolType{}, nil
+	case *StringNode:
+		return &StringType{}, nil
 	case *OperationNode:
 		opTyp, err := TypeChecker(node.Operands[0])
 		if err != nil {
 			return nil, err
 		}
+		node.OperandsType = opTyp
 		switch node.Operation {
 		case "+", "-", "*", "/":
 			if !IsNumberType(opTyp) {
 				return nil, fmt.Errorf("%s -> can't use not number type in '%s' operation", node.Position(), node.Operation)
 			}
 			node.OperationType = opTyp
-			node.OperandsType = opTyp
 			return TypeCheckOperatorOperands(node)
 		case "=", "<>", "<", ">", "<=", ">=":
 			if !IsComparableType(opTyp) {
 				return nil, fmt.Errorf("%s -> can't use not comparable type in '%s' operation", node.Position(), node.Operation)
 			}
 			node.OperationType = &BoolType{}
-			node.OperandsType = opTyp
 			return TypeCheckOperatorOperands(node)
 		case "|", "&":
 			if !IsBooleanType(opTyp) {
 				return nil, fmt.Errorf("%s -> can't use not boolean type in '%s' operation", node.Position(), node.Operation)
 			}
-			node.OperationType = &BoolType{}
-			node.OperandsType = opTyp
+			node.OperationType = opTyp
+			return TypeCheckOperatorOperands(node)
+		case "++":
+			if !IsStringType(opTyp) {
+				return nil, fmt.Errorf("%s -> can't use not string type in '%s' operation", node.Position(), node.Operation)
+			}
+			node.OperationType = opTyp
 			return TypeCheckOperatorOperands(node)
 		default:
 			return nil, fmt.Errorf("%s -> unexpected operation '%s'", node.Position(), node.Operation)
@@ -340,6 +398,10 @@ func Eval(node Node) (Value, error) {
 		}
 		return BoolValue{
 			Value: false,
+		}, nil
+	case *StringNode:
+		return StringValue{
+			Value: node.Value,
 		}, nil
 	case *OperationNode:
 		operands := []Value{}
@@ -425,6 +487,21 @@ func Eval(node Node) (Value, error) {
 				return AndBool(values...), nil
 			default:
 				return nil, fmt.Errorf("%s -> unexpected operation '%s' for 'bool' type", node.Position(), node.Operation)
+			}
+		case *StringType:
+			values, err := ValuesToString(operands...)
+			if err != nil {
+				return nil, err
+			}
+			switch node.Operation {
+			case "=":
+				return EqualString(values...), nil
+			case "<>":
+				return NeqString(values...), nil
+			case "++":
+				return ConcatString(values...), nil
+			default:
+				return nil, fmt.Errorf("%s -> unexpected operation '%s' for 'string' type", node.Position(), node.Operation)
 			}
 		default:
 			return nil, fmt.Errorf("%s -> unexpected '%s' operation type '%s'",
@@ -745,4 +822,42 @@ func AndBool(operands ...BoolValue) BoolValue {
 		}
 	}
 	return BoolValue{Value: true}
+}
+
+// String funcs
+
+func EqualString(operands ...StringValue) BoolValue {
+	comp := StringValue{}
+	for index, operand := range operands {
+		if index == 0 {
+			comp = operand
+			continue
+		}
+		if comp.Value != operand.Value {
+			return BoolValue{Value: false}
+		}
+	}
+	return BoolValue{Value: true}
+}
+
+func NeqString(operands ...StringValue) BoolValue {
+	comp := StringValue{}
+	for index, operand := range operands {
+		if index == 0 {
+			comp = operand
+			continue
+		}
+		if comp.Value == operand.Value {
+			return BoolValue{Value: false}
+		}
+	}
+	return BoolValue{Value: true}
+}
+
+func ConcatString(operands ...StringValue) StringValue {
+	var builder strings.Builder
+	for _, operand := range operands {
+		builder.WriteString(operand.Value)
+	}
+	return StringValue{Value: builder.String()}
 }

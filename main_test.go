@@ -8,7 +8,7 @@ import (
 	"github.com/alecthomas/participle/v2"
 )
 
-const program = `(& (< 1 2) (<> 12 24))`
+const program = `(= "hello" (++ "hel" "lo"))`
 
 func TestInterpreter(t *testing.T) {
 	var errBuf bytes.Buffer
