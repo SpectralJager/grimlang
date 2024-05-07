@@ -35,10 +35,14 @@ var (
 		"Root": []lexer.Rule{
 			{Name: "wspace", Pattern: `[ \r\t\n]+`},
 
+			{Name: "Def", Pattern: `def`},
+			{Name: "Symbol", Pattern: `\??[a-zA-Z]+[a-zA-Z0-9_]*`},
+
 			{Name: "StringStart", Pattern: `"`, Action: lexer.Push("String")},
 			{Name: "Boolean", Pattern: `(true|false)`},
 			{Name: "Float", Pattern: `-?[0-9]+\.[0-9]*`},
 			{Name: "Integer", Pattern: `-?[0-9]+`},
+			{Name: "Unit", Pattern: `\(\)`},
 
 			{Name: "++", Pattern: `\+\+`},
 			{Name: "+", Pattern: `\+`},
@@ -62,7 +66,7 @@ var (
 			{Name: "String", Pattern: `(\\"|[^"])*`},
 		},
 	})
-	Parser = participle.MustBuild[OperationNode](
+	Parser = participle.MustBuild[DefNode](
 		participle.Lexer(Lexer),
 		participle.UseLookahead(1),
 		participle.Union[ExpressionNode](
@@ -91,6 +95,12 @@ type (
 		OperationType Type
 		OperandsType  Type
 	}
+	DefNode struct {
+		_node
+		Identifier  string         `parser:"'(' 'def' @Symbol"`
+		Content     ExpressionNode `parser:"@@ ')'"`
+		ContentType Type
+	}
 	IntegerNode struct {
 		_node
 		Value int `parser:"@Integer"`
@@ -107,6 +117,10 @@ type (
 		_node
 		Value string `parser:"StringStart @String StringEnd"`
 	}
+	UnitNode struct {
+		_node
+		Value string `parser:"'()'"`
+	}
 )
 
 func (node *_node) Position() lexer.Position {
@@ -115,16 +129,109 @@ func (node *_node) Position() lexer.Position {
 
 func InspectNode(node Node) string {
 	switch node := node.(type) {
+	case *UnitNode:
+		return "unit_node"
 	case *IntegerNode:
 		return "integer_node"
 	case *FloatNode:
 		return "float_node"
 	case *BoolNode:
 		return "bool_node"
+	case *StringNode:
+		return "string_node"
+	case *DefNode:
+		return "def_node"
 	case *OperationNode:
 		return fmt.Sprintf("operation_%s", node.Operation)
 	default:
 		return "invalid_node"
+	}
+}
+
+// Enviroment
+
+type Enviroment struct {
+	Name    string
+	Symbols map[string]Symbol
+	Parent  *Enviroment
+}
+
+func NewEnviroment(name string, parent *Enviroment) *Enviroment {
+	return &Enviroment{
+		Name:    name,
+		Parent:  parent,
+		Symbols: map[string]Symbol{},
+	}
+}
+
+func (env *Enviroment) Insert(sm Symbol) error {
+	ident := SymbolIdentifier(sm)
+	_, ok := env.Symbols[ident]
+	if !ok {
+		return fmt.Errorf("symbol '%s' already exists in enviroment %s", ident, env.Name)
+	}
+	return nil
+}
+
+func (env *Enviroment) Lookup(ident string) (Symbol, error) {
+	sm, ok := env.Symbols[ident]
+	if !ok {
+		return nil, fmt.Errorf("symbol '%s' not found in enviroment %s", ident, env.Name)
+	}
+	return sm, nil
+}
+
+func (env *Enviroment) LookupAll(ident string) (Symbol, error) {
+	sm, err := env.Lookup(ident)
+	if err == nil {
+		return sm, nil
+	}
+	if env.Parent == nil {
+		return nil, err
+	}
+	return env.Parent.LookupAll(ident)
+}
+
+func (env *Enviroment) Inspect() string {
+	symbols := []string{}
+	for _, sm := range env.Symbols {
+		symbols = append(symbols, InspectSymbol(sm))
+	}
+	return fmt.Sprintf("=== Env:%s |>\n\t%s\n", env.Name, strings.Join(symbols, "\n\t"))
+}
+
+// Symbol
+
+type (
+	Symbol interface {
+		symbol()
+	}
+	_symbol  struct{}
+	Variable struct {
+		_symbol
+		Identifier string
+		Type       Type
+		Value      Value
+	}
+)
+
+func (*_symbol) symbol() {}
+
+func SymbolIdentifier(sm Symbol) string {
+	switch sm := sm.(type) {
+	case *Variable:
+		return sm.Identifier
+	default:
+		return ""
+	}
+}
+
+func InspectSymbol(sm Symbol) string {
+	switch sm := sm.(type) {
+	case *Variable:
+		return fmt.Sprintf("%s -> var %s", sm.Identifier, InspectType(sm.Type))
+	default:
+		return "invalid_symbol"
 	}
 }
 
@@ -135,6 +242,7 @@ type (
 		value()
 	}
 	_value       struct{}
+	UnitValue    struct{ _value }
 	IntegerValue struct {
 		_value
 		Value int
@@ -157,6 +265,8 @@ func (_value) value() {}
 
 func InspectValue(value Value) string {
 	switch value := value.(type) {
+	case UnitValue:
+		return "()"
 	case IntegerValue:
 		return fmt.Sprintf("%d", value.Value)
 	case FloatValue:
@@ -168,6 +278,14 @@ func InspectValue(value Value) string {
 	default:
 		return "invalid_value"
 	}
+}
+
+func ValueToUnit(value Value) (UnitValue, error) {
+	val, ok := value.(UnitValue)
+	if !ok {
+		return UnitValue{}, fmt.Errorf("can't convert value to unit")
+	}
+	return val, nil
 }
 
 func ValueToString(value Value) (StringValue, error) {
@@ -257,6 +375,7 @@ type (
 		tp()
 	}
 	_type       struct{}
+	UnitType    struct{ _type }
 	IntegerType struct{ _type }
 	FloatType   struct{ _type }
 	BoolType    struct{ _type }
@@ -267,6 +386,8 @@ func (*_type) tp() {}
 
 func InspectType(typ Type) string {
 	switch typ.(type) {
+	case *UnitType:
+		return "unit"
 	case *IntegerType:
 		return "int"
 	case *FloatType:
@@ -310,7 +431,7 @@ func IsFloatType(a Type) bool {
 
 // Type checking
 
-func TypeChecker(node Node) (Type, error) {
+func TypeChecker(env *Enviroment, node Node) (Type, error) {
 	switch node := node.(type) {
 	case *IntegerNode:
 		return &IntegerType{}, nil
@@ -320,8 +441,17 @@ func TypeChecker(node Node) (Type, error) {
 		return &BoolType{}, nil
 	case *StringNode:
 		return &StringType{}, nil
+	case *UnitNode:
+		return &UnitType{}, nil
+	case *DefNode:
+		contType, err := TypeChecker(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		node.ContentType = contType
+		return &UnitType{}, nil
 	case *OperationNode:
-		opTyp, err := TypeChecker(node.Operands[0])
+		opTyp, err := TypeChecker(env, node.Operands[0])
 		if err != nil {
 			return nil, err
 		}
@@ -332,36 +462,36 @@ func TypeChecker(node Node) (Type, error) {
 				return nil, fmt.Errorf("%s -> can't use not number type in '%s' operation", node.Position(), node.Operation)
 			}
 			node.OperationType = opTyp
-			return TypeCheckOperatorOperands(node)
+			return TypeCheckOperatorOperands(env, node)
 		case "=", "<>", "<", ">", "<=", ">=":
 			if !IsComparableType(opTyp) {
 				return nil, fmt.Errorf("%s -> can't use not comparable type in '%s' operation", node.Position(), node.Operation)
 			}
 			node.OperationType = &BoolType{}
-			return TypeCheckOperatorOperands(node)
+			return TypeCheckOperatorOperands(env, node)
 		case "|", "&":
 			if !IsBooleanType(opTyp) {
 				return nil, fmt.Errorf("%s -> can't use not boolean type in '%s' operation", node.Position(), node.Operation)
 			}
 			node.OperationType = opTyp
-			return TypeCheckOperatorOperands(node)
+			return TypeCheckOperatorOperands(env, node)
 		case "++":
 			if !IsStringType(opTyp) {
 				return nil, fmt.Errorf("%s -> can't use not string type in '%s' operation", node.Position(), node.Operation)
 			}
 			node.OperationType = opTyp
-			return TypeCheckOperatorOperands(node)
+			return TypeCheckOperatorOperands(env, node)
 		default:
 			return nil, fmt.Errorf("%s -> unexpected operation '%s'", node.Position(), node.Operation)
 		}
 	default:
-		return nil, fmt.Errorf("%s -> can't evaluate unexpected node '%s'", node.Position(), InspectNode(node))
+		return nil, fmt.Errorf("%s -> can't check unexpected node '%s'", node.Position(), InspectNode(node))
 	}
 }
 
-func TypeCheckOperatorOperands(node *OperationNode) (Type, error) {
+func TypeCheckOperatorOperands(env *Enviroment, node *OperationNode) (Type, error) {
 	for index, operand := range node.Operands {
-		typ, err := TypeChecker(operand)
+		typ, err := TypeChecker(env, operand)
 		if err != nil {
 			return nil, err
 		}
@@ -380,8 +510,10 @@ func TypeCheckOperatorOperands(node *OperationNode) (Type, error) {
 
 // Evaluator
 
-func Eval(node Node) (Value, error) {
+func Eval(env *Enviroment, node Node) (Value, error) {
 	switch node := node.(type) {
+	case *UnitNode:
+		return UnitValue{}, nil
 	case *IntegerNode:
 		return IntegerValue{
 			Value: node.Value,
@@ -403,10 +535,16 @@ func Eval(node Node) (Value, error) {
 		return StringValue{
 			Value: node.Value,
 		}, nil
+	case *DefNode:
+		_, err := Eval(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		return UnitValue{}, nil
 	case *OperationNode:
 		operands := []Value{}
 		for _, operand := range node.Operands {
-			val, err := Eval(operand)
+			val, err := Eval(env, operand)
 			if err != nil {
 				return nil, err
 			}

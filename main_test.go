@@ -8,7 +8,7 @@ import (
 	"github.com/alecthomas/participle/v2"
 )
 
-const program = `(= "hello" (++ "hel" "lo"))`
+const program = `(def test 12)`
 
 func TestInterpreter(t *testing.T) {
 	var errBuf bytes.Buffer
@@ -17,13 +17,15 @@ func TestInterpreter(t *testing.T) {
 		fmt.Println(errBuf.String())
 		t.Fatal(err)
 	}
-	resTyp, err := TypeChecker(resNode)
+	mainEnv := NewEnviroment("main_global", nil)
+	resTyp, err := TypeChecker(mainEnv, resNode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resVal, err := Eval(resNode)
+	resVal, err := Eval(mainEnv, resNode)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fmt.Printf("result: %s of %s\n", InspectValue(resVal), InspectType(resTyp))
+	fmt.Println(mainEnv.Inspect())
 }
