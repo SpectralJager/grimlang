@@ -9,9 +9,9 @@ import (
 )
 
 const program = `{
-	(def a 12)
-	(def b (* a a))
-	(+ a b)
+	(var a = (* 24 12))
+	(set a = (* a a))
+	a
 }`
 
 func TestInterpreter(t *testing.T) {
@@ -30,6 +30,6 @@ func TestInterpreter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("result: %s of %s\n", InspectValue(resVal), InspectType(resTyp))
 	fmt.Println(mainEnv.Inspect())
+	fmt.Printf("result: %s of %s\n", InspectValue(resVal), InspectType(resTyp))
 }

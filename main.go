@@ -73,17 +73,28 @@ var (
 		participle.UseLookahead(1),
 		participle.Union[BlockUnionNode](
 			&UnitNode{},
+			&SymbolNode{},
 			&OperationNode{},
 			&DefNode{},
+			&VarNode{},
+			&SetNode{},
 		),
-		participle.Union[ExpressionUnionNode](
+		participle.Union[DefUnionNode](
+			&IntegerNode{},
+			&FloatNode{},
+			&BoolNode{},
+			&StringNode{},
 			&BlockNode{},
 			&OperationNode{},
+		),
+		participle.Union[ExpressionUnionNode](
 			&SymbolNode{},
 			&IntegerNode{},
 			&FloatNode{},
 			&BoolNode{},
 			&StringNode{},
+			&BlockNode{},
+			&OperationNode{},
 		),
 	)
 )
@@ -94,6 +105,7 @@ type (
 		Position() lexer.Position
 	}
 	ExpressionUnionNode interface{ Node }
+	DefUnionNode        interface{ Node }
 	BlockUnionNode      interface{ Node }
 	_node               struct {
 		Pos lexer.Position
@@ -113,8 +125,20 @@ type (
 	}
 	DefNode struct {
 		_node
-		Identifier  *SymbolNode         `parser:"'(' 'def' @@"`
-		Content     ExpressionUnionNode `parser:"@@ ')'"`
+		Identifier  *SymbolNode  `parser:"'(' 'def' @@"`
+		Content     DefUnionNode `parser:"@@ ')'"`
+		ContentType Type
+	}
+	SetNode struct {
+		_node
+		Identifier  *SymbolNode         `parser:"'(' 'set' @@"`
+		Content     ExpressionUnionNode `parser:"'=' @@ ')'"`
+		ContentType Type
+	}
+	VarNode struct {
+		_node
+		Identifier  *SymbolNode         `parser:"'(' 'var' @@"`
+		Content     ExpressionUnionNode `parser:"'=' @@ ')'"`
 		ContentType Type
 	}
 	SymbolNode struct {
@@ -163,6 +187,10 @@ func InspectNode(node Node) string {
 		return "symbol_node"
 	case *DefNode:
 		return "def_node"
+	case *VarNode:
+		return "var_node"
+	case *SetNode:
+		return "set_node"
 	case *BlockNode:
 		return "block_node"
 	case *OperationNode:
@@ -228,13 +256,17 @@ func (env *Enviroment) Inspect() string {
 
 type (
 	Symbol struct {
-		Ident *SymbolNode
-		Type  Type
-		Value Value
+		Ident     *SymbolNode
+		Type      Type
+		Value     Value
+		IsMutable bool
 	}
 )
 
 func InspectSymbol(sm *Symbol) string {
+	if sm.IsMutable {
+		return fmt.Sprintf("%s -> mut %s", sm.Ident.Value, InspectType(sm.Type))
+	}
 	return fmt.Sprintf("%s -> %s", sm.Ident.Value, InspectType(sm.Type))
 }
 
@@ -464,6 +496,46 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
 		return sm.Type, nil
+	case *SetNode:
+		contType, err := TypeChecke(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		if isUnitType(contType) {
+			return nil, fmt.Errorf("%s -> can't assign unit type to symbol '%s'", node.Position(), node.Identifier.Value)
+		}
+		node.ContentType = contType
+		sm, err := env.LookupAll(node.Identifier.Value)
+		if err != nil {
+			return nil, err
+		}
+		if !sm.IsMutable {
+			return nil, fmt.Errorf("%s -> can't change value of constant symbol '%s'", node.Position(), node.Identifier.Value)
+		}
+		if !CompareTypes(sm.Type, contType) {
+			return nil, fmt.Errorf("%s -> can't set new value of different type to '%s' of '%s'", node.Position(), node.Identifier.Value, InspectType(sm.Type))
+		}
+		return types["unit"], nil
+	case *VarNode:
+		contType, err := TypeChecke(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		if isUnitType(contType) {
+			return nil, fmt.Errorf("%s -> can't assign unit type to symbol '%s'", node.Position(), node.Identifier.Value)
+		}
+		node.ContentType = contType
+		err = env.Insert(
+			&Symbol{
+				Ident:     node.Identifier,
+				Type:      node.ContentType,
+				IsMutable: true,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return types["unit"], nil
 	case *DefNode:
 		contType, err := TypeChecke(env, node.Content)
 		if err != nil {
@@ -588,6 +660,28 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
 		return sm.Value, nil
+	case *SetNode:
+		contVal, err := Eval(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		sm, err := env.LookupAll(node.Identifier.Value)
+		if err != nil {
+			return nil, err
+		}
+		sm.Value = contVal
+		return UnitValue{}, nil
+	case *VarNode:
+		val, err := Eval(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		sm, err := env.Lookup(node.Identifier.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		sm.Value = val
+		return UnitValue{}, nil
 	case *DefNode:
 		val, err := Eval(env, node.Content)
 		if err != nil {
