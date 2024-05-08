@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"maps"
+	"os"
 	"strings"
 
 	"github.com/alecthomas/participle/v2"
@@ -36,13 +38,21 @@ var (
 			{Name: "wspace", Pattern: `[ \r\t\n]+`},
 
 			{Name: "Def", Pattern: `def`},
-			{Name: "Symbol", Pattern: `\??[a-zA-Z]+[a-zA-Z0-9_]*`},
+			{Name: "Set", Pattern: `var`},
+			{Name: "Var", Pattern: `set`},
+
+			{Name: "IntT", Pattern: `int`},
+			{Name: "BoolT", Pattern: `bool`},
+			{Name: "StringT", Pattern: `string`},
+			{Name: "FloatT", Pattern: `float`},
+			{Name: "UnitT", Pattern: `unit`},
 
 			{Name: "StringStart", Pattern: `"`, Action: lexer.Push("String")},
 			{Name: "Boolean", Pattern: `(true|false)`},
 			{Name: "Float", Pattern: `-?[0-9]+\.[0-9]*`},
 			{Name: "Integer", Pattern: `-?[0-9]+`},
 			{Name: "Unit", Pattern: `\(\)`},
+			{Name: "Symbol", Pattern: `\??[a-zA-Z]+[a-zA-Z0-9_]*`},
 
 			{Name: "++", Pattern: `\+\+`},
 			{Name: "+", Pattern: `\+`},
@@ -58,43 +68,59 @@ var (
 			{Name: "|", Pattern: `\|`},
 			{Name: "&", Pattern: `&`},
 
+			{Name: ":", Pattern: `:`},
 			{Name: "(", Pattern: `\(`},
 			{Name: ")", Pattern: `\)`},
+			{Name: "[", Pattern: `\[`},
+			{Name: "]", Pattern: `\]`},
 			{Name: "{", Pattern: `{`},
 			{Name: "}", Pattern: `}`},
+			{Name: "<", Pattern: `<`},
+			{Name: ">", Pattern: `>`},
 		},
 		"String": {
 			{Name: "StringEnd", Pattern: `"`, Action: lexer.Pop()},
 			{Name: "String", Pattern: `(\\"|[^"])*`},
 		},
 	})
-	Parser = participle.MustBuild[BlockNode](
+	Parser = participle.MustBuild[ModuleNode](
 		participle.Lexer(Lexer),
 		participle.UseLookahead(1),
+		participle.Union[ModuleUnionNode](
+			&DefNode{},
+		),
 		participle.Union[BlockUnionNode](
+			&OperationNode{},
 			&UnitNode{},
 			&SymbolNode{},
-			&OperationNode{},
 			&DefNode{},
 			&VarNode{},
 			&SetNode{},
+			&CallNode{},
 		),
 		participle.Union[DefUnionNode](
+			&OperationNode{},
 			&IntegerNode{},
 			&FloatNode{},
 			&BoolNode{},
 			&StringNode{},
 			&BlockNode{},
-			&OperationNode{},
+			&FnNode{},
+			&CallNode{},
+		),
+		participle.Union[DatatypeUnionNode](
+			&PrimitiveNode{},
 		),
 		participle.Union[ExpressionUnionNode](
+			&OperationNode{},
 			&SymbolNode{},
 			&IntegerNode{},
 			&FloatNode{},
 			&BoolNode{},
 			&StringNode{},
 			&BlockNode{},
-			&OperationNode{},
+			&FnNode{},
+			&CallNode{},
 		),
 	)
 )
@@ -107,6 +133,8 @@ type (
 	ExpressionUnionNode interface{ Node }
 	DefUnionNode        interface{ Node }
 	BlockUnionNode      interface{ Node }
+	ModuleUnionNode     interface{ Node }
+	DatatypeUnionNode   interface{ Node }
 	_node               struct {
 		Pos lexer.Position
 	}
@@ -116,12 +144,23 @@ type (
 		ReturnType Type
 		Env        Enviroment
 	}
+	ModuleNode struct {
+		_node
+		Body []ModuleUnionNode `parser:"@@+"`
+		Env  Enviroment
+	}
 	OperationNode struct {
 		_node
 		Operation     string                `parser:"'(' @('+'|'-'|'*'|'/'|'<'|'='|'<>'|'>'|'<='|'>='|'|'|'&'|'++')"`
 		Operands      []ExpressionUnionNode `parser:"@@ @@+ ')'"`
 		OperationType Type
 		OperandsType  Type
+	}
+	CallNode struct {
+		_node
+		Callable   *SymbolNode           `parser:"'(' @@"`
+		Inputs     []ExpressionUnionNode `parser:" @@* ')'"`
+		ReturnType Type
 	}
 	DefNode struct {
 		_node
@@ -140,6 +179,24 @@ type (
 		Identifier  *SymbolNode         `parser:"'(' 'var' @@"`
 		Content     ExpressionUnionNode `parser:"'=' @@ ')'"`
 		ContentType Type
+	}
+	FnNode struct {
+		_node
+		Inputs  []*InputNode        `parser:"'(' 'fn' ('[' @@+ ']')? "`
+		Output  DatatypeUnionNode   `parser:"'<' @@ '>'"`
+		Content ExpressionUnionNode `parser:"@@ ')'"`
+		Type    Type
+		Env     Enviroment
+	}
+	InputNode struct {
+		_node
+		Identifier *SymbolNode       `parser:"@@"`
+		Datatype   DatatypeUnionNode `parser:"':' @@"`
+		Type       Type
+	}
+	PrimitiveNode struct {
+		_node
+		Datatype string `parser:"@('int'|'float'|'string'|'bool'|'unit')"`
 	}
 	SymbolNode struct {
 		_node
@@ -173,6 +230,8 @@ func (node *_node) Position() lexer.Position {
 
 func InspectNode(node Node) string {
 	switch node := node.(type) {
+	case *ModuleNode:
+		return "module_node"
 	case *UnitNode:
 		return "unit_node"
 	case *IntegerNode:
@@ -193,6 +252,14 @@ func InspectNode(node Node) string {
 		return "set_node"
 	case *BlockNode:
 		return "block_node"
+	case *CallNode:
+		return "call_node"
+	case *PrimitiveNode:
+		return "primitive_node"
+	case *FnNode:
+		return "fn_node"
+	case *InputNode:
+		return "input_node"
 	case *OperationNode:
 		return fmt.Sprintf("operation_%s", node.Operation)
 	default:
@@ -214,6 +281,21 @@ func NewEnviroment(name string, parent *Enviroment) *Enviroment {
 		Parent:  parent,
 		Symbols: map[string]*Symbol{},
 	}
+}
+
+func (env *Enviroment) CloneSymbols(other *Enviroment) error {
+	env.Symbols = maps.Clone(other.Symbols)
+	return nil
+}
+
+func (env *Enviroment) ModuleEnv() *Enviroment {
+	if env.Name == "module" {
+		return env
+	}
+	if env.Parent != nil {
+		return env.Parent.ModuleEnv()
+	}
+	return nil
 }
 
 func (env *Enviroment) Insert(sm *Symbol) error {
@@ -260,14 +342,19 @@ type (
 		Type      Type
 		Value     Value
 		IsMutable bool
+		IsBuiltin bool
 	}
 )
 
 func InspectSymbol(sm *Symbol) string {
-	if sm.IsMutable {
+	switch {
+	case sm.IsMutable:
 		return fmt.Sprintf("%s -> mut %s", sm.Ident.Value, InspectType(sm.Type))
+	case sm.IsBuiltin:
+		return fmt.Sprintf("%s -> builtin %s", sm.Ident.Value, InspectType(sm.Type))
+	default:
+		return fmt.Sprintf("%s -> %s", sm.Ident.Value, InspectType(sm.Type))
 	}
-	return fmt.Sprintf("%s -> %s", sm.Ident.Value, InspectType(sm.Type))
 }
 
 // Value
@@ -294,6 +381,16 @@ type (
 		_value
 		Value string
 	}
+	BuiltinFuncValue struct {
+		_value
+		Fn func(...Value) (Value, error)
+	}
+	FuncValue struct {
+		_value
+		Inputs  []*InputNode
+		Content ExpressionUnionNode
+		Env     Enviroment
+	}
 )
 
 func (_value) value() {}
@@ -310,6 +407,10 @@ func InspectValue(value Value) string {
 		return fmt.Sprintf("%v", value.Value)
 	case StringValue:
 		return fmt.Sprintf("\"%s\"", value.Value)
+	case BuiltinFuncValue:
+		return "builtin_fn"
+	case FuncValue:
+		return "fn"
 	default:
 		return "invalid_value"
 	}
@@ -409,12 +510,17 @@ type (
 	Type interface {
 		tp()
 	}
-	_type       struct{}
-	UnitType    struct{ _type }
-	IntegerType struct{ _type }
-	FloatType   struct{ _type }
-	BoolType    struct{ _type }
-	StringType  struct{ _type }
+	_type        struct{}
+	UnitType     struct{ _type }
+	IntegerType  struct{ _type }
+	FloatType    struct{ _type }
+	BoolType     struct{ _type }
+	StringType   struct{ _type }
+	FunctionType struct {
+		_type
+		Inputs []Type
+		Output Type
+	}
 )
 
 func (*_type) tp() {}
@@ -428,7 +534,7 @@ var types = map[string]Type{
 }
 
 func InspectType(typ Type) string {
-	switch typ.(type) {
+	switch typ := typ.(type) {
 	case *UnitType:
 		return "unit"
 	case *IntegerType:
@@ -439,6 +545,16 @@ func InspectType(typ Type) string {
 		return "bool"
 	case *StringType:
 		return "string"
+	case *FunctionType:
+		inputs := []string{}
+		for _, input := range typ.Inputs {
+			inputs = append(inputs, InspectType(input))
+		}
+		if typ.Output == nil {
+			return "illigal"
+		}
+		output := InspectType(typ.Output)
+		return fmt.Sprintf("fn[%s]<%s>", strings.Join(inputs, " "), output)
 	default:
 		return "illigal"
 	}
@@ -472,14 +588,32 @@ func IsFloatType(a Type) bool {
 	return CompareTypes(types["float"], a)
 }
 
-func isUnitType(a Type) bool {
+func IsUnitType(a Type) bool {
 	return CompareTypes(types["unit"], a)
+}
+
+func IsFunctionType(a Type) bool {
+	if _, ok := a.(*FunctionType); ok {
+		return true
+	}
+	return false
 }
 
 // Type checking
 
 func TypeChecke(env *Enviroment, node Node) (Type, error) {
 	switch node := node.(type) {
+	case *ModuleNode:
+		moduleEnv := NewEnviroment("module", env)
+		for _, content := range node.Body {
+			_, err := TypeChecke(moduleEnv, content)
+			if err != nil {
+				return nil, err
+			}
+		}
+		node.Env = *moduleEnv
+		fmt.Println(moduleEnv.Inspect())
+		return types["unit"], nil
 	case *IntegerNode:
 		return types["int"], nil
 	case *FloatNode:
@@ -490,18 +624,78 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		return types["string"], nil
 	case *UnitNode:
 		return types["unit"], nil
+	case *PrimitiveNode:
+		switch node.Datatype {
+		case "int":
+			return types["int"], nil
+		case "float":
+			return types["float"], nil
+		case "bool":
+			return types["bool"], nil
+		case "string":
+			return types["string"], nil
+		case "unit":
+			return types["unit"], nil
+		default:
+			return nil, fmt.Errorf("%s -> unexpected primitive type '%s'", node.Position(), node.Datatype)
+		}
 	case *SymbolNode:
 		sm, err := env.LookupAll(node.Value)
 		if err != nil {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
 		return sm.Type, nil
+	case *InputNode:
+		typ, err := TypeChecke(env, node.Datatype)
+		if err != nil {
+			return nil, err
+		}
+		if IsUnitType(typ) {
+			return nil, fmt.Errorf("%s -> can't use unit type for input", node.Position())
+		}
+		err = env.Insert(
+			&Symbol{
+				Ident: node.Identifier,
+				Type:  typ,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return typ, nil
+	case *FnNode:
+		fnEnv := NewEnviroment("fn", env)
+		inputs := []Type{}
+		for _, input := range node.Inputs {
+			inTyp, err := TypeChecke(fnEnv, input)
+			if err != nil {
+				return nil, err
+			}
+			inputs = append(inputs, inTyp)
+		}
+		output, err := TypeChecke(fnEnv, node.Output)
+		if err != nil {
+			return nil, err
+		}
+		resTyp, err := TypeChecke(fnEnv, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		if !CompareTypes(resTyp, output) {
+			return nil, fmt.Errorf("%s -> return types mismatched", node.Position())
+		}
+		node.Env = *fnEnv
+		node.Type = &FunctionType{
+			Inputs: inputs,
+			Output: output,
+		}
+		return node.Type, nil
 	case *SetNode:
 		contType, err := TypeChecke(env, node.Content)
 		if err != nil {
 			return nil, err
 		}
-		if isUnitType(contType) {
+		if IsUnitType(contType) {
 			return nil, fmt.Errorf("%s -> can't assign unit type to symbol '%s'", node.Position(), node.Identifier.Value)
 		}
 		node.ContentType = contType
@@ -521,7 +715,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		if isUnitType(contType) {
+		if IsUnitType(contType) {
 			return nil, fmt.Errorf("%s -> can't assign unit type to symbol '%s'", node.Position(), node.Identifier.Value)
 		}
 		node.ContentType = contType
@@ -541,7 +735,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		if isUnitType(contType) {
+		if IsUnitType(contType) {
 			return nil, fmt.Errorf("%s -> can't assign unit type to symbol '%s'", node.Position(), node.Identifier.Value)
 		}
 		node.ContentType = contType
@@ -568,6 +762,32 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		}
 		node.Env = *blockEnv
 		fmt.Println(blockEnv.Inspect())
+		return node.ReturnType, nil
+	case *CallNode:
+		typ, err := TypeChecke(env, node.Callable)
+		if err != nil {
+			return nil, err
+		}
+		fnTyp, ok := typ.(*FunctionType)
+		if !ok {
+			return nil, fmt.Errorf("%s -> callable should be function, got '%s'", node.Position(), InspectType(fnTyp))
+		}
+		if fnTyp.Output == nil {
+			return nil, fmt.Errorf("%s -> function should contain return type", node.Position())
+		}
+		node.ReturnType = fnTyp.Output
+		if len(node.Inputs) != len(fnTyp.Inputs) {
+			return nil, fmt.Errorf("%s -> number of inputs mismatched", node.Position())
+		}
+		for index, input := range node.Inputs {
+			inTyp, err := TypeChecke(env, input)
+			if err != nil {
+				return nil, err
+			}
+			if !CompareTypes(fnTyp.Inputs[index], inTyp) {
+				return nil, fmt.Errorf("%s -> #%d input type mismatched", input.Position(), index)
+			}
+		}
 		return node.ReturnType, nil
 	case *OperationNode:
 		opTyp, err := TypeChecke(env, node.Operands[0])
@@ -631,6 +851,23 @@ func TypeCheckOperatorOperands(env *Enviroment, node *OperationNode) (Type, erro
 
 func Eval(env *Enviroment, node Node) (Value, error) {
 	switch node := node.(type) {
+	case *ModuleNode:
+		moduleEnv := node.Env
+		for _, content := range node.Body {
+			_, err := Eval(&moduleEnv, content)
+			if err != nil {
+				return nil, err
+			}
+		}
+		_, err := Eval(&moduleEnv, &CallNode{
+			Callable: &SymbolNode{
+				Value: "main",
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return UnitValue{}, nil
 	case *UnitNode:
 		return UnitValue{}, nil
 	case *IntegerNode:
@@ -694,10 +931,11 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		sm.Value = val
 		return UnitValue{}, nil
 	case *BlockNode:
-		blockEnv := node.Env
+		blockEnv := NewEnviroment("block", env)
+		blockEnv.CloneSymbols(&node.Env)
 		retVal := Value(UnitValue{})
 		for index, content := range node.Body {
-			val, err := Eval(&blockEnv, content)
+			val, err := Eval(blockEnv, content)
 			if err != nil {
 				return nil, err
 			}
@@ -706,6 +944,50 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 			}
 		}
 		return retVal, nil
+	case *FnNode:
+		return FuncValue{
+			Inputs:  node.Inputs,
+			Content: node.Content,
+			Env:     node.Env,
+		}, nil
+	case *CallNode:
+		callVal, err := Eval(env, node.Callable)
+		if err != nil {
+			return nil, err
+		}
+		inputs := []Value{}
+		for _, input := range node.Inputs {
+			val, err := Eval(env, input)
+			if err != nil {
+				return nil, err
+			}
+			inputs = append(inputs, val)
+		}
+		switch val := callVal.(type) {
+		case BuiltinFuncValue:
+			res, err := val.Fn(inputs...)
+			if err != nil {
+				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+			}
+			return res, nil
+		case FuncValue:
+			fnEnv := NewEnviroment("fn", env.ModuleEnv())
+			fnEnv.CloneSymbols(&val.Env)
+			for index, input := range val.Inputs {
+				sm, err := fnEnv.Lookup(input.Identifier.Value)
+				if err != nil {
+					return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+				}
+				sm.Value = inputs[index]
+			}
+			res, err := Eval(fnEnv, val.Content)
+			if err != nil {
+				return nil, err
+			}
+			return res, nil
+		default:
+			return nil, fmt.Errorf("%s -> can't call not callable node", node.Position())
+		}
 	case *OperationNode:
 		operands := []Value{}
 		for _, operand := range node.Operands {
@@ -1163,4 +1445,146 @@ func ConcatString(operands ...StringValue) StringValue {
 		builder.WriteString(operand.Value)
 	}
 	return StringValue{Value: builder.String()}
+}
+
+func InsertBuiltinSymbols(env *Enviroment) {
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "println"},
+		Type: &FunctionType{
+			Inputs: []Type{&StringType{}},
+			Output: &UnitType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Println,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "print"},
+		Type: &FunctionType{
+			Inputs: []Type{&StringType{}},
+			Output: &UnitType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Print,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "itof"},
+		Type: &FunctionType{
+			Inputs: []Type{&IntegerType{}},
+			Output: &FloatType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Itof,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "itos"},
+		Type: &FunctionType{
+			Inputs: []Type{&IntegerType{}},
+			Output: &StringType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Itos,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "ftoi"},
+		Type: &FunctionType{
+			Inputs: []Type{&FloatType{}},
+			Output: &IntegerType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Ftoi,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "ftos"},
+		Type: &FunctionType{
+			Inputs: []Type{&FloatType{}},
+			Output: &StringType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Ftos,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "readFile"},
+		Type: &FunctionType{
+			Inputs: []Type{&StringType{}},
+			Output: &StringType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: ReadFile,
+		},
+		IsBuiltin: true,
+	})
+}
+
+func Println(inputs ...Value) (Value, error) {
+	input, err := ValueToString(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(input.Value)
+	return UnitValue{}, nil
+}
+
+func Print(inputs ...Value) (Value, error) {
+	input, err := ValueToString(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	fmt.Print(input.Value)
+	return UnitValue{}, nil
+}
+
+func Itof(inputs ...Value) (Value, error) {
+	input, err := ValueToInteger(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	return FloatValue{Value: float64(input.Value)}, nil
+}
+
+func Itos(inputs ...Value) (Value, error) {
+	input, err := ValueToInteger(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	return StringValue{Value: fmt.Sprint(input.Value)}, nil
+}
+
+func Ftoi(inputs ...Value) (Value, error) {
+	input, err := ValueToFloat(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	return IntegerValue{Value: int(input.Value)}, nil
+}
+
+func Ftos(inputs ...Value) (Value, error) {
+	input, err := ValueToFloat(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	return StringValue{Value: fmt.Sprint(input.Value)}, nil
+}
+
+func ReadFile(inputs ...Value) (Value, error) {
+	filename, err := ValueToString(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filename.Value)
+	if err != nil {
+		return nil, err
+	}
+	return StringValue{Value: string(data)}, nil
 }

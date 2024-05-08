@@ -8,11 +8,13 @@ import (
 	"github.com/alecthomas/participle/v2"
 )
 
-const program = `{
-	(var a = (* 24 12))
-	(set a = (* a a))
-	a
-}`
+const program = `
+(def main (fn <unit> {
+	(def a "Hello")
+	(println (++ a " World"))
+	()
+}))
+`
 
 func TestInterpreter(t *testing.T) {
 	var errBuf bytes.Buffer
@@ -21,15 +23,16 @@ func TestInterpreter(t *testing.T) {
 		fmt.Println(errBuf.String())
 		t.Fatal(err)
 	}
-	mainEnv := NewEnviroment("main_global", nil)
-	resTyp, err := TypeChecke(mainEnv, resNode)
+	builtin := NewEnviroment("builtin", nil)
+	InsertBuiltinSymbols(builtin)
+	resTyp, err := TypeChecke(builtin, resNode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resVal, err := Eval(mainEnv, resNode)
+	fmt.Println(builtin.Inspect())
+	resVal, err := Eval(builtin, resNode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println(mainEnv.Inspect())
 	fmt.Printf("result: %s of %s\n", InspectValue(resVal), InspectType(resTyp))
 }
