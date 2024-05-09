@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"maps"
 	"os"
 	"strings"
 
@@ -40,6 +39,8 @@ var (
 			{Name: "Def", Pattern: `def`},
 			{Name: "Set", Pattern: `var`},
 			{Name: "Var", Pattern: `set`},
+			{Name: "Cond", Pattern: `cond`},
+			{Name: "Case", Pattern: `case`},
 
 			{Name: "IntT", Pattern: `int`},
 			{Name: "BoolT", Pattern: `bool`},
@@ -54,20 +55,20 @@ var (
 			{Name: "Unit", Pattern: `\(\)`},
 			{Name: "Symbol", Pattern: `\??[a-zA-Z]+[a-zA-Z0-9_]*`},
 
+			{Name: "<=", Pattern: `<=`},
+			{Name: ">=", Pattern: `>=`},
+			{Name: "<>", Pattern: `<>`},
 			{Name: "++", Pattern: `\+\+`},
+
 			{Name: "+", Pattern: `\+`},
 			{Name: "-", Pattern: `-`},
 			{Name: "*", Pattern: `\*`},
 			{Name: "/", Pattern: `\/`},
-			{Name: "<>", Pattern: `<>`},
 			{Name: "<", Pattern: `<`},
 			{Name: ">", Pattern: `>`},
 			{Name: "=", Pattern: `=`},
-			{Name: "<=", Pattern: `<=`},
-			{Name: ">=", Pattern: `>=`},
 			{Name: "|", Pattern: `\|`},
 			{Name: "&", Pattern: `&`},
-
 			{Name: ":", Pattern: `:`},
 			{Name: "(", Pattern: `\(`},
 			{Name: ")", Pattern: `\)`},
@@ -75,8 +76,6 @@ var (
 			{Name: "]", Pattern: `\]`},
 			{Name: "{", Pattern: `{`},
 			{Name: "}", Pattern: `}`},
-			{Name: "<", Pattern: `<`},
-			{Name: ">", Pattern: `>`},
 		},
 		"String": {
 			{Name: "StringEnd", Pattern: `"`, Action: lexer.Pop()},
@@ -85,14 +84,23 @@ var (
 	})
 	Parser = participle.MustBuild[ModuleNode](
 		participle.Lexer(Lexer),
-		participle.UseLookahead(1),
+		participle.UseLookahead(4),
 		participle.Union[ModuleUnionNode](
-			&DefNode{},
+			&ConstNode{},
+			&FnNode{},
+		),
+		participle.Union[ConstantUnionNode](
+			&IntegerNode{},
+			&FloatNode{},
+			&BoolNode{},
+			&StringNode{},
 		),
 		participle.Union[BlockUnionNode](
 			&OperationNode{},
 			&UnitNode{},
 			&SymbolNode{},
+			&CondNode{},
+			&CaseNode{},
 			&DefNode{},
 			&VarNode{},
 			&SetNode{},
@@ -105,7 +113,9 @@ var (
 			&BoolNode{},
 			&StringNode{},
 			&BlockNode{},
-			&FnNode{},
+			&CondNode{},
+			&CaseNode{},
+			&LambdaNode{},
 			&CallNode{},
 		),
 		participle.Union[DatatypeUnionNode](
@@ -119,7 +129,9 @@ var (
 			&BoolNode{},
 			&StringNode{},
 			&BlockNode{},
-			&FnNode{},
+			&CondNode{},
+			&CaseNode{},
+			&LambdaNode{},
 			&CallNode{},
 		),
 	)
@@ -135,6 +147,7 @@ type (
 	BlockUnionNode      interface{ Node }
 	ModuleUnionNode     interface{ Node }
 	DatatypeUnionNode   interface{ Node }
+	ConstantUnionNode   interface{ Node }
 	_node               struct {
 		Pos lexer.Position
 	}
@@ -155,6 +168,33 @@ type (
 		Operands      []ExpressionUnionNode `parser:"@@ @@+ ')'"`
 		OperationType Type
 		OperandsType  Type
+	}
+	CondNode struct {
+		_node
+		Cases     []*CaseNode         `parser:"'(' 'cond' @@+"`
+		Else      ExpressionUnionNode `parser:"@@ ')'"`
+		CasesType Type
+	}
+	CaseNode struct {
+		_node
+		Condition   ExpressionUnionNode `parser:"'(' 'case' @@"`
+		Content     ExpressionUnionNode `parser:"@@ ')'"`
+		ContentType Type
+	}
+	FnNode struct {
+		_node
+		Identifier *SymbolNode         `parser:"'(' 'def' @@"`
+		Inputs     []*InputNode        `parser:"'(' 'fn' ('[' @@+ ']')?"`
+		Output     *PrimitiveNode      `parser:"'<' @@ '>' "`
+		Content    ExpressionUnionNode `parser:"@@ ')' ')'"`
+		Type       *FunctionType
+		Env        Enviroment
+	}
+	ConstNode struct {
+		_node
+		Identifier   *SymbolNode       `parser:"'(' 'def' @@"`
+		Constant     ConstantUnionNode `parser:"@@ ')'"`
+		ConstantType Type
 	}
 	CallNode struct {
 		_node
@@ -180,12 +220,12 @@ type (
 		Content     ExpressionUnionNode `parser:"'=' @@ ')'"`
 		ContentType Type
 	}
-	FnNode struct {
+	LambdaNode struct {
 		_node
 		Inputs  []*InputNode        `parser:"'(' 'fn' ('[' @@+ ']')? "`
 		Output  DatatypeUnionNode   `parser:"'<' @@ '>'"`
 		Content ExpressionUnionNode `parser:"@@ ')'"`
-		Type    Type
+		Type    *FunctionType
 		Env     Enviroment
 	}
 	InputNode struct {
@@ -256,10 +296,18 @@ func InspectNode(node Node) string {
 		return "call_node"
 	case *PrimitiveNode:
 		return "primitive_node"
-	case *FnNode:
-		return "fn_node"
+	case *LambdaNode:
+		return "lambda_node"
 	case *InputNode:
 		return "input_node"
+	case *CaseNode:
+		return "case_node"
+	case *CondNode:
+		return "cond_node"
+	case *ConstNode:
+		return "const_node"
+	case *FnNode:
+		return "fn_node"
 	case *OperationNode:
 		return fmt.Sprintf("operation_%s", node.Operation)
 	default:
@@ -269,10 +317,20 @@ func InspectNode(node Node) string {
 
 // Enviroment
 
+type EnviromentKind int
+
+const (
+	LocalEK EnviromentKind = iota
+	BuiltinEK
+	GlobalEK
+)
+
 type Enviroment struct {
-	Name    string
-	Symbols map[string]*Symbol
-	Parent  *Enviroment
+	Name         string
+	Symbols      map[string]*Symbol
+	Parent       *Enviroment
+	Kind         EnviromentKind
+	IsCollecting bool
 }
 
 func NewEnviroment(name string, parent *Enviroment) *Enviroment {
@@ -284,16 +342,26 @@ func NewEnviroment(name string, parent *Enviroment) *Enviroment {
 }
 
 func (env *Enviroment) CloneSymbols(other *Enviroment) error {
-	env.Symbols = maps.Clone(other.Symbols)
+	for _, symb := range other.Symbols {
+		newSymb := *symb
+		// env.Insert(&Symbol{
+		// 	Ident:     symb.Ident,
+		// 	Type:      symb.Type,
+		// 	Value:     symb.Value,
+		// 	IsMutable: symb.IsMutable,
+		// 	IsBuiltin: symb.IsBuiltin,
+		// })
+		env.Insert(&newSymb)
+	}
 	return nil
 }
 
-func (env *Enviroment) ModuleEnv() *Enviroment {
-	if env.Name == "module" {
+func (env *Enviroment) ClosestEnv(kind EnviromentKind) *Enviroment {
+	if env.Kind == kind {
 		return env
 	}
 	if env.Parent != nil {
-		return env.Parent.ModuleEnv()
+		return env.Parent.ClosestEnv(kind)
 	}
 	return nil
 }
@@ -605,6 +673,15 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 	switch node := node.(type) {
 	case *ModuleNode:
 		moduleEnv := NewEnviroment("module", env)
+		moduleEnv.Kind = GlobalEK
+		moduleEnv.IsCollecting = true
+		for _, content := range node.Body {
+			_, err := TypeChecke(moduleEnv, content)
+			if err != nil {
+				return nil, err
+			}
+		}
+		moduleEnv.IsCollecting = false
 		for _, content := range node.Body {
 			_, err := TypeChecke(moduleEnv, content)
 			if err != nil {
@@ -613,6 +690,75 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		}
 		node.Env = *moduleEnv
 		fmt.Println(moduleEnv.Inspect())
+		return types["unit"], nil
+	case *FnNode:
+		if !env.IsCollecting {
+			fnEnv := node.Env
+			resTyp, err := TypeChecke(&fnEnv, node.Content)
+			if err != nil {
+				return nil, err
+			}
+			if !CompareTypes(resTyp, node.Type.Output) {
+				return nil, fmt.Errorf("%s -> return types mismatched", node.Position())
+			}
+			return types["unit"], nil
+		}
+		fnEnv := NewEnviroment("lambda", env)
+		inputs := []Type{}
+		for _, input := range node.Inputs {
+			inTyp, err := TypeChecke(fnEnv, input)
+			if err != nil {
+				return nil, err
+			}
+			inputs = append(inputs, inTyp)
+		}
+		output, err := TypeChecke(fnEnv, node.Output)
+		if err != nil {
+			return nil, err
+		}
+		node.Env = *fnEnv
+		node.Type = &FunctionType{
+			Inputs: inputs,
+			Output: output,
+		}
+		err = env.Insert(
+			&Symbol{
+				Ident: node.Identifier,
+				Type:  node.Type,
+				Value: FuncValue{
+					Inputs:  node.Inputs,
+					Content: node.Content,
+					Env:     node.Env,
+				},
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return types["unit"], nil
+	case *ConstNode:
+		if !env.IsCollecting {
+			return types["unit"], nil
+		}
+		val, err := Eval(env, node.Constant)
+		if err != nil {
+			return nil, err
+		}
+		typ, err := TypeChecke(env, node.Constant)
+		if err != nil {
+			return nil, err
+		}
+		node.ConstantType = typ
+		err = env.Insert(
+			&Symbol{
+				Ident: node.Identifier,
+				Type:  node.ConstantType,
+				Value: val,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
 		return types["unit"], nil
 	case *IntegerNode:
 		return types["int"], nil
@@ -663,8 +809,8 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
 		return typ, nil
-	case *FnNode:
-		fnEnv := NewEnviroment("fn", env)
+	case *LambdaNode:
+		fnEnv := NewEnviroment("lambda", env)
 		inputs := []Type{}
 		for _, input := range node.Inputs {
 			inTyp, err := TypeChecke(fnEnv, input)
@@ -789,6 +935,44 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 			}
 		}
 		return node.ReturnType, nil
+	case *CaseNode:
+		condType, err := TypeChecke(env, node.Condition)
+		if err != nil {
+			return nil, err
+		}
+		if !IsBooleanType(condType) {
+			return nil, fmt.Errorf("%s -> condition type should be bool, got %s", node.Position(), InspectType(condType))
+		}
+		contType, err := TypeChecke(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		node.ContentType = contType
+		return contType, nil
+	case *CondNode:
+		csType := Type(types["unit"])
+		for i, cs := range node.Cases {
+			typ, err := TypeChecke(env, cs)
+			if err != nil {
+				return nil, err
+			}
+			if i == 0 {
+				csType = typ
+				continue
+			}
+			if !CompareTypes(csType, typ) {
+				return nil, fmt.Errorf("%s -> content type of cases should be same, expect %s -- got %s", cs.Position(), InspectType(csType), InspectType(typ))
+			}
+		}
+		elseType, err := TypeChecke(env, node.Else)
+		if err != nil {
+			return nil, err
+		}
+		if !CompareTypes(csType, elseType) {
+			return nil, fmt.Errorf("%s -> content type of cases should be same, expect %s -- got %s", node.Else.Position(), InspectType(csType), InspectType(elseType))
+		}
+		node.CasesType = csType
+		return csType, nil
 	case *OperationNode:
 		opTyp, err := TypeChecke(env, node.Operands[0])
 		if err != nil {
@@ -853,12 +1037,7 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 	switch node := node.(type) {
 	case *ModuleNode:
 		moduleEnv := node.Env
-		for _, content := range node.Body {
-			_, err := Eval(&moduleEnv, content)
-			if err != nil {
-				return nil, err
-			}
-		}
+		moduleEnv.Kind = GlobalEK
 		_, err := Eval(&moduleEnv, &CallNode{
 			Callable: &SymbolNode{
 				Value: "main",
@@ -944,7 +1123,7 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 			}
 		}
 		return retVal, nil
-	case *FnNode:
+	case *LambdaNode:
 		return FuncValue{
 			Inputs:  node.Inputs,
 			Content: node.Content,
@@ -971,7 +1150,7 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 			}
 			return res, nil
 		case FuncValue:
-			fnEnv := NewEnviroment("fn", env.ModuleEnv())
+			fnEnv := NewEnviroment("fn", env.ClosestEnv(GlobalEK))
 			fnEnv.CloneSymbols(&val.Env)
 			for index, input := range val.Inputs {
 				sm, err := fnEnv.Lookup(input.Identifier.Value)
@@ -988,6 +1167,30 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		default:
 			return nil, fmt.Errorf("%s -> can't call not callable node", node.Position())
 		}
+	case *CaseNode:
+		condVal, err := Eval(env, node.Condition)
+		if err != nil {
+			return nil, err
+		}
+		condBool, err := ValueToBool(condVal)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		if !condBool.Value {
+			return nil, nil
+		}
+		return Eval(env, node.Content)
+	case *CondNode:
+		for _, cs := range node.Cases {
+			res, err := Eval(env, cs)
+			if err != nil {
+				return nil, err
+			}
+			if res != nil {
+				return res, nil
+			}
+		}
+		return Eval(env, node.Else)
 	case *OperationNode:
 		operands := []Value{}
 		for _, operand := range node.Operands {

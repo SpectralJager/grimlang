@@ -9,10 +9,17 @@ import (
 )
 
 const program = `
+(def n 35)
+
+(def fib (fn [n:int] <int> 
+	(cond
+		(case (< n 2) n)
+		(+ (fib (- n 1)) (fib (- n 2))))
+))
+
 (def main (fn <unit> {
-	(def a "Hello")
-	(println (++ a " World"))
-	()
+	(def res (fib n))
+	(println (itos res))
 }))
 `
 
@@ -24,6 +31,7 @@ func TestInterpreter(t *testing.T) {
 		t.Fatal(err)
 	}
 	builtin := NewEnviroment("builtin", nil)
+	builtin.Kind = BuiltinEK
 	InsertBuiltinSymbols(builtin)
 	resTyp, err := TypeChecke(builtin, resNode)
 	if err != nil {
