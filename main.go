@@ -47,6 +47,8 @@ var (
 			{Name: "StringT", Pattern: `string`},
 			{Name: "FloatT", Pattern: `float`},
 			{Name: "UnitT", Pattern: `unit`},
+			{Name: "CompT", Pattern: `comp`},
+			{Name: "ListT", Pattern: `list`},
 
 			{Name: "StringStart", Pattern: `"`, Action: lexer.Push("String")},
 			{Name: "Boolean", Pattern: `(true|false)`},
@@ -100,22 +102,9 @@ var (
 			&UnitNode{},
 			&SymbolNode{},
 			&CondNode{},
-			&CaseNode{},
 			&DefNode{},
 			&VarNode{},
 			&SetNode{},
-			&CallNode{},
-		),
-		participle.Union[DefUnionNode](
-			&OperationNode{},
-			&IntegerNode{},
-			&FloatNode{},
-			&BoolNode{},
-			&StringNode{},
-			&BlockNode{},
-			&CondNode{},
-			&CaseNode{},
-			&LambdaNode{},
 			&CallNode{},
 		),
 		participle.Union[DatatypeUnionNode](
@@ -123,6 +112,7 @@ var (
 		),
 		participle.Union[ExpressionUnionNode](
 			&OperationNode{},
+			&ListNode{},
 			&SymbolNode{},
 			&IntegerNode{},
 			&FloatNode{},
@@ -143,7 +133,6 @@ type (
 		Position() lexer.Position
 	}
 	ExpressionUnionNode interface{ Node }
-	DefUnionNode        interface{ Node }
 	BlockUnionNode      interface{ Node }
 	ModuleUnionNode     interface{ Node }
 	DatatypeUnionNode   interface{ Node }
@@ -204,8 +193,8 @@ type (
 	}
 	DefNode struct {
 		_node
-		Identifier  *SymbolNode  `parser:"'(' 'def' @@"`
-		Content     DefUnionNode `parser:"@@ ')'"`
+		Identifier  *SymbolNode         `parser:"'(' 'def' @@"`
+		Content     ExpressionUnionNode `parser:"@@ ')'"`
 		ContentType Type
 	}
 	SetNode struct {
@@ -262,6 +251,11 @@ type (
 		_node
 		Value string `parser:"'()'"`
 	}
+	ListNode struct {
+		_node
+		SubType DatatypeUnionNode     `parser:"'list' '<' @@ '>'"`
+		Items   []ExpressionUnionNode `parser:"'{' @@* '}'"`
+	}
 )
 
 func (node *_node) Position() lexer.Position {
@@ -308,6 +302,8 @@ func InspectNode(node Node) string {
 		return "const_node"
 	case *FnNode:
 		return "fn_node"
+	case *ListNode:
+		return "list_node"
 	case *OperationNode:
 		return fmt.Sprintf("operation_%s", node.Operation)
 	default:
@@ -344,13 +340,6 @@ func NewEnviroment(name string, parent *Enviroment) *Enviroment {
 func (env *Enviroment) CloneSymbols(other *Enviroment) error {
 	for _, symb := range other.Symbols {
 		newSymb := *symb
-		// env.Insert(&Symbol{
-		// 	Ident:     symb.Ident,
-		// 	Type:      symb.Type,
-		// 	Value:     symb.Value,
-		// 	IsMutable: symb.IsMutable,
-		// 	IsBuiltin: symb.IsBuiltin,
-		// })
 		env.Insert(&newSymb)
 	}
 	return nil
@@ -459,6 +448,10 @@ type (
 		Content ExpressionUnionNode
 		Env     Enviroment
 	}
+	ListValue struct {
+		_value
+		Items []Value
+	}
 )
 
 func (_value) value() {}
@@ -475,6 +468,12 @@ func InspectValue(value Value) string {
 		return fmt.Sprintf("%v", value.Value)
 	case StringValue:
 		return fmt.Sprintf("\"%s\"", value.Value)
+	case ListValue:
+		items := []string{}
+		for _, item := range value.Items {
+			items = append(items, InspectValue(item))
+		}
+		return fmt.Sprintf("{%s}", strings.Join(items, " "))
 	case BuiltinFuncValue:
 		return "builtin_fn"
 	case FuncValue:
@@ -482,6 +481,14 @@ func InspectValue(value Value) string {
 	default:
 		return "invalid_value"
 	}
+}
+
+func ValueToList(value Value) (ListValue, error) {
+	val, ok := value.(ListValue)
+	if !ok {
+		return ListValue{}, fmt.Errorf("can't convert value to list")
+	}
+	return val, nil
 }
 
 func ValueToUnit(value Value) (UnitValue, error) {
@@ -579,6 +586,7 @@ type (
 		tp()
 	}
 	_type        struct{}
+	CompType     struct{ _type }
 	UnitType     struct{ _type }
 	IntegerType  struct{ _type }
 	FloatType    struct{ _type }
@@ -589,11 +597,16 @@ type (
 		Inputs []Type
 		Output Type
 	}
+	ListType struct {
+		_type
+		Subtype Type
+	}
 )
 
 func (*_type) tp() {}
 
 var types = map[string]Type{
+	// "comp":   &CompType{},
 	"unit":   &UnitType{},
 	"int":    &IntegerType{},
 	"float":  &FloatType{},
@@ -603,6 +616,8 @@ var types = map[string]Type{
 
 func InspectType(typ Type) string {
 	switch typ := typ.(type) {
+	case *CompType:
+		return "comp"
 	case *UnitType:
 		return "unit"
 	case *IntegerType:
@@ -623,12 +638,22 @@ func InspectType(typ Type) string {
 		}
 		output := InspectType(typ.Output)
 		return fmt.Sprintf("fn[%s]<%s>", strings.Join(inputs, " "), output)
+	case *ListType:
+		return fmt.Sprintf("list<%s>", InspectType(typ.Subtype))
 	default:
 		return "illigal"
 	}
 }
 
 func CompareTypes(a, b Type) bool {
+	if IsCompType(a) || IsCompType(b) {
+		return true
+	}
+	if IsListType(a) && IsListType(b) {
+		listA := a.(*ListType)
+		listB := b.(*ListType)
+		return CompareTypes(listA.Subtype, listB.Subtype)
+	}
 	return InspectType(a) == InspectType(b)
 }
 
@@ -662,6 +687,20 @@ func IsUnitType(a Type) bool {
 
 func IsFunctionType(a Type) bool {
 	if _, ok := a.(*FunctionType); ok {
+		return true
+	}
+	return false
+}
+
+func IsListType(a Type) bool {
+	if _, ok := a.(*ListType); ok {
+		return true
+	}
+	return false
+}
+
+func IsCompType(a Type) bool {
+	if _, ok := a.(*CompType); ok {
 		return true
 	}
 	return false
@@ -770,6 +809,23 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		return types["string"], nil
 	case *UnitNode:
 		return types["unit"], nil
+	case *ListNode:
+		subtype, err := TypeChecke(env, node.SubType)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range node.Items {
+			itemTyp, err := TypeChecke(env, item)
+			if err != nil {
+				return nil, err
+			}
+			if !CompareTypes(subtype, itemTyp) {
+				return nil, fmt.Errorf("%s -> list items should be same type", item.Position())
+			}
+		}
+		return &ListType{
+			Subtype: subtype,
+		}, nil
 	case *PrimitiveNode:
 		switch node.Datatype {
 		case "int":
@@ -1069,6 +1125,18 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 	case *StringNode:
 		return StringValue{
 			Value: node.Value,
+		}, nil
+	case *ListNode:
+		items := []Value{}
+		for _, item := range node.Items {
+			itemVal, err := Eval(env, item)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, itemVal)
+		}
+		return ListValue{
+			Items: items,
 		}, nil
 	case *SymbolNode:
 		sm, err := env.LookupAll(node.Value)
@@ -1718,6 +1786,39 @@ func InsertBuiltinSymbols(env *Enviroment) {
 		IsBuiltin: true,
 	})
 	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "ltos"},
+		Type: &FunctionType{
+			Inputs: []Type{&ListType{Subtype: &CompType{}}},
+			Output: &StringType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Ltos,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "llen"},
+		Type: &FunctionType{
+			Inputs: []Type{&ListType{Subtype: &CompType{}}},
+			Output: &IntegerType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Llen,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "lappend"},
+		Type: &FunctionType{
+			Inputs: []Type{&ListType{Subtype: &CompType{}}, &CompType{}},
+			Output: &ListType{Subtype: &CompType{}},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Ltos,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
 		Ident: &SymbolNode{Value: "readFile"},
 		Type: &FunctionType{
 			Inputs: []Type{&StringType{}},
@@ -1778,6 +1879,32 @@ func Ftos(inputs ...Value) (Value, error) {
 		return nil, err
 	}
 	return StringValue{Value: fmt.Sprint(input.Value)}, nil
+}
+
+func Ltos(inputs ...Value) (Value, error) {
+	input, err := ValueToList(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	return StringValue{Value: InspectValue(input)}, nil
+}
+
+func Llen(inputs ...Value) (Value, error) {
+	input, err := ValueToList(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	return IntegerValue{Value: len(input.Items)}, nil
+}
+
+func Lappend(inputs ...Value) (Value, error) {
+	lst, err := ValueToList(inputs[0])
+	if err != nil {
+		return nil, err
+	}
+	val := inputs[1]
+	lst.Items = append(lst.Items, val)
+	return lst, nil
 }
 
 func ReadFile(inputs ...Value) (Value, error) {

@@ -9,17 +9,10 @@ import (
 )
 
 const program = `
-(def n 35)
-
-(def fib (fn [n:int] <int> 
-	(cond
-		(case (< n 2) n)
-		(+ (fib (- n 1)) (fib (- n 2))))
-))
-
 (def main (fn <unit> {
-	(def res (fib n))
-	(println (itos res))
+	(def lst list<int>{1 2 3})
+	(println (ltos lst))
+	()
 }))
 `
 
