@@ -698,49 +698,6 @@ func IsCompType(a Type) bool {
 	return false
 }
 
-// Comp type checking
-
-func CompTypeReplace(origin Type, replace Type) (Type, bool) {
-	switch typ := origin.(type) {
-	default:
-		return typ, false
-	case *CompType:
-		return replace, true
-	case *ListType:
-		res, ok := CompTypeReplace(typ.Subtype, replace)
-		if !ok {
-			return typ, false
-		}
-		typ.Subtype = res
-		return typ, true
-	case *FunctionType:
-		repl := CompTypeExptr(replace)
-		for index := range typ.Inputs {
-			input := typ.Inputs[index]
-			res, ok := CompTypeReplace(input, repl)
-			if !ok {
-				continue
-			}
-			typ.Inputs[index] = res
-		}
-		res, ok := CompTypeReplace(typ.Output, repl)
-		if ok {
-			typ.Output = res
-		}
-		return typ, false
-	}
-}
-
-func CompTypeExptr(replace Type) Type {
-	switch replace := replace.(type) {
-	case *ListType:
-		return replace.Subtype
-	default:
-		return replace
-	}
-
-}
-
 // Type checking
 
 func TypeCheck(env *Enviroment, node Node) (Type, error) {
@@ -1012,18 +969,9 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		if fnTyp.Output == nil {
 			return nil, fmt.Errorf("%s -> function should contain return type", node.Position())
 		}
+		node.ReturnType = fnTyp.Output
 		if len(node.Inputs) != len(fnTyp.Inputs) {
 			return nil, fmt.Errorf("%s -> number of inputs mismatched", node.Position())
-		}
-		if len(fnTyp.Inputs) != 0 {
-			compTyp, err := TypeCheck(env, node.Inputs[0])
-			if err != nil {
-				return nil, err
-			}
-			fmt.Println("before: ", InspectType(fnTyp))
-			res, _ := CompTypeReplace(fnTyp, compTyp)
-			fmt.Println("after: ", InspectType(res))
-			fnTyp = res.(*FunctionType)
 		}
 		for index, input := range node.Inputs {
 			inTyp, err := TypeCheck(env, input)
@@ -1034,7 +982,6 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 				return nil, fmt.Errorf("%s -> #%d input type mismatched", input.Position(), index)
 			}
 		}
-		node.ReturnType = fnTyp.Output
 		return node.ReturnType, nil
 	case *CaseNode:
 		condType, err := TypeCheck(env, node.Condition)
