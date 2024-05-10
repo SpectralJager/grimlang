@@ -88,8 +88,8 @@ var (
 		participle.Lexer(Lexer),
 		participle.UseLookahead(4),
 		participle.Union[ModuleUnionNode](
-			&ConstNode{},
 			&FnNode{},
+			&ConstNode{},
 		),
 		participle.Union[ConstantUnionNode](
 			&IntegerNode{},
@@ -172,12 +172,9 @@ type (
 	}
 	FnNode struct {
 		_node
-		Identifier *SymbolNode         `parser:"'(' 'def' @@"`
-		Inputs     []*InputNode        `parser:"'(' 'fn' ('[' @@+ ']')?"`
-		Output     *PrimitiveNode      `parser:"'<' @@ '>' "`
-		Content    ExpressionUnionNode `parser:"@@ ')' ')'"`
-		Type       *FunctionType
-		Env        Enviroment
+		Identifier *SymbolNode   `parser:"'(' 'def' @@"`
+		Fns        []*LambdaNode `parser:"@@+ ')'"`
+		Types      []*FunctionType
 	}
 	ConstNode struct {
 		_node
@@ -190,6 +187,7 @@ type (
 		Callable   *SymbolNode           `parser:"'(' @@"`
 		Inputs     []ExpressionUnionNode `parser:" @@* ')'"`
 		ReturnType Type
+		PolyIndex  int
 	}
 	DefNode struct {
 		_node
@@ -448,6 +446,10 @@ type (
 		Content ExpressionUnionNode
 		Env     Enviroment
 	}
+	PolyFuncValue struct {
+		_value
+		Fns []FuncValue
+	}
 	ListValue struct {
 		_value
 		Items []Value
@@ -478,6 +480,8 @@ func InspectValue(value Value) string {
 		return "builtin_fn"
 	case FuncValue:
 		return "fn"
+	case PolyFuncValue:
+		return "fns"
 	default:
 		return "invalid_value"
 	}
@@ -597,6 +601,10 @@ type (
 		Inputs []Type
 		Output Type
 	}
+	PolyFuncType struct {
+		_type
+		Fns []*FunctionType
+	}
 	ListType struct {
 		_type
 		Subtype Type
@@ -638,6 +646,15 @@ func InspectType(typ Type) string {
 		}
 		output := InspectType(typ.Output)
 		return fmt.Sprintf("fn[%s]<%s>", strings.Join(inputs, " "), output)
+	case *PolyFuncType:
+		fns := []string{}
+		for _, fn := range typ.Fns {
+			fns = append(fns, InspectType(fn))
+		}
+		if len(fns) == 1 {
+			return fns[0]
+		}
+		return fmt.Sprintf("{%s}", strings.Join(fns, " "))
 	case *ListType:
 		return fmt.Sprintf("list<%s>", InspectType(typ.Subtype))
 	default:
@@ -774,42 +791,47 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		return types["unit"], nil
 	case *FnNode:
 		if !env.IsCollecting {
-			fnEnv := node.Env
-			resTyp, err := TypeCheck(&fnEnv, node.Content)
-			if err != nil {
-				return nil, err
-			}
-			if !CompareTypes(resTyp, node.Type.Output) {
-				return nil, fmt.Errorf("%s -> return types mismatched", node.Position())
+			for _, fn := range node.Fns {
+				_, err := TypeCheck(&fn.Env, fn.Content)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return types["unit"], nil
 		}
-		fnEnv := NewEnviroment("lambda", env)
-		inputs := []Type{}
-		for _, input := range node.Inputs {
-			inTyp, err := TypeCheck(fnEnv, input)
+		fnsValue := []FuncValue{}
+		for _, fn := range node.Fns {
+			inputs := []Type{}
+			fnEnv := NewEnviroment("fn", env)
+			for _, input := range fn.Inputs {
+				inputTyp, err := TypeCheck(fnEnv, input)
+				if err != nil {
+					return nil, err
+				}
+				inputs = append(inputs, inputTyp)
+			}
+			output, err := TypeCheck(fnEnv, fn.Output)
 			if err != nil {
 				return nil, err
 			}
-			inputs = append(inputs, inTyp)
+			fn.Env = *fnEnv
+			fn.Type = &FunctionType{
+				Inputs: inputs,
+				Output: output,
+			}
+			node.Types = append(node.Types, fn.Type)
+			fnsValue = append(fnsValue, FuncValue{
+				Inputs:  fn.Inputs,
+				Env:     *fnEnv,
+				Content: fn.Content,
+			})
 		}
-		output, err := TypeCheck(fnEnv, node.Output)
-		if err != nil {
-			return nil, err
-		}
-		node.Env = *fnEnv
-		node.Type = &FunctionType{
-			Inputs: inputs,
-			Output: output,
-		}
-		err = env.Insert(
+		err := env.Insert(
 			&Symbol{
 				Ident: node.Identifier,
-				Type:  node.Type,
-				Value: FuncValue{
-					Inputs:  node.Inputs,
-					Content: node.Content,
-					Env:     node.Env,
+				Type:  &PolyFuncType{Fns: node.Types},
+				Value: PolyFuncValue{
+					Fns: fnsValue,
 				},
 			},
 		)
@@ -1012,49 +1034,43 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		fnTyp, ok := typ.(*FunctionType)
-		if !ok {
-			return nil, fmt.Errorf("%s -> callable should be function, got '%s'", node.Position(), InspectType(fnTyp))
-		}
-		if fnTyp.Output == nil {
-			return nil, fmt.Errorf("%s -> function should contain return type", node.Position())
-		}
-		node.ReturnType = fnTyp.Output
-		if len(node.Inputs) != len(fnTyp.Inputs) {
-			return nil, fmt.Errorf("%s -> number of inputs mismatched", node.Position())
-		}
-		var comp Type
-		for index, input := range node.Inputs {
-			inTyp, err := TypeCheck(env, input)
-			if err != nil {
-				return nil, err
-			}
-			if ContainsComp(fnTyp.Inputs[index]) {
-				res, ok := CompTypeCheck(fnTyp.Inputs[index], inTyp)
-				if !ok {
-					return nil, fmt.Errorf("%s -> #%d input can't check comp", input.Position(), index)
+		switch fnTyp := typ.(type) {
+		case *FunctionType:
+			return CallFuncCheck(env, fnTyp, node)
+		case *PolyFuncType:
+			inputs := []Type{}
+			for _, input := range node.Inputs {
+				typ, err := TypeCheck(env, input)
+				if err != nil {
+					return nil, err
 				}
-				if comp == nil {
-					comp = res
-				} else {
-					if !CompareTypes(comp, res) {
-						return nil, fmt.Errorf("%s -> #%d input comp type mismatched", input.Position(), index)
+				inputs = append(inputs, typ)
+			}
+			var typ *FunctionType
+			for index, fnTyp := range fnTyp.Fns {
+				if len(inputs) != len(fnTyp.Inputs) {
+					continue
+				}
+				finded := true
+				for i, input := range fnTyp.Inputs {
+					if !CompareTypes(input, inputs[i]) {
+						finded = true
+						break
 					}
 				}
-			} else if !CompareTypes(fnTyp.Inputs[index], inTyp) {
-				return nil, fmt.Errorf("%s -> #%d input type mismatched", input.Position(), index)
+				if finded {
+					typ = fnTyp
+					node.PolyIndex = index
+					break
+				}
 			}
+			if typ == nil {
+				return nil, fmt.Errorf("%s -> can't match function with such inputs", node.Position())
+			}
+			return CallFuncCheck(env, typ, node)
+		default:
+			return nil, fmt.Errorf("%s -> callable should be function, got '%s'", node.Position(), InspectType(typ))
 		}
-		if ContainsComp(fnTyp.Output) {
-			if comp == nil {
-				return nil, fmt.Errorf("%s -> can't replace comp output without comp input", node.Position())
-			}
-			node.ReturnType, ok = ReplaceComp(fnTyp.Output, comp)
-			if !ok {
-				return nil, fmt.Errorf("%s -> can't replace comp output", node.Position())
-			}
-		}
-		return node.ReturnType, nil
 	case *CaseNode:
 		condType, err := TypeCheck(env, node.Condition)
 		if err != nil {
@@ -1149,6 +1165,49 @@ func TypeCheckOperatorOperands(env *Enviroment, node *OperationNode) (Type, erro
 		}
 	}
 	return node.OperationType, nil
+}
+
+func CallFuncCheck(env *Enviroment, fnTyp *FunctionType, node *CallNode) (Type, error) {
+	if fnTyp.Output == nil {
+		return nil, fmt.Errorf("%s -> function should contain return type", node.Position())
+	}
+	node.ReturnType = fnTyp.Output
+	if len(node.Inputs) != len(fnTyp.Inputs) {
+		return nil, fmt.Errorf("%s -> number of inputs mismatched", node.Position())
+	}
+	var comp Type
+	for index, input := range node.Inputs {
+		inTyp, err := TypeCheck(env, input)
+		if err != nil {
+			return nil, err
+		}
+		if ContainsComp(fnTyp.Inputs[index]) {
+			res, ok := CompTypeCheck(fnTyp.Inputs[index], inTyp)
+			if !ok {
+				return nil, fmt.Errorf("%s -> #%d input can't check comp", input.Position(), index)
+			}
+			if comp == nil {
+				comp = res
+			} else {
+				if !CompareTypes(comp, res) {
+					return nil, fmt.Errorf("%s -> #%d input comp type mismatched", input.Position(), index)
+				}
+			}
+		} else if !CompareTypes(fnTyp.Inputs[index], inTyp) {
+			return nil, fmt.Errorf("%s -> #%d input type mismatched", input.Position(), index)
+		}
+	}
+	var ok bool
+	if ContainsComp(fnTyp.Output) {
+		if comp == nil {
+			return nil, fmt.Errorf("%s -> can't replace comp output without comp input", node.Position())
+		}
+		node.ReturnType, ok = ReplaceComp(fnTyp.Output, comp)
+		if !ok {
+			return nil, fmt.Errorf("%s -> can't replace comp output", node.Position())
+		}
+	}
+	return node.ReturnType, nil
 }
 
 // Evaluator
@@ -1266,36 +1325,13 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		inputs := []Value{}
-		for _, input := range node.Inputs {
-			val, err := Eval(env, input)
-			if err != nil {
-				return nil, err
-			}
-			inputs = append(inputs, val)
-		}
 		switch val := callVal.(type) {
 		case BuiltinFuncValue:
-			res, err := val.Fn(inputs...)
-			if err != nil {
-				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
-			}
-			return res, nil
+			return EvalFunc(env, val, node)
 		case FuncValue:
-			fnEnv := NewEnviroment("fn", env.ClosestEnv(GlobalEK))
-			fnEnv.CloneSymbols(&val.Env)
-			for index, input := range val.Inputs {
-				sm, err := fnEnv.Lookup(input.Identifier.Value)
-				if err != nil {
-					return nil, fmt.Errorf("%s -> %w", node.Position(), err)
-				}
-				sm.Value = inputs[index]
-			}
-			res, err := Eval(fnEnv, val.Content)
-			if err != nil {
-				return nil, err
-			}
-			return res, nil
+			return EvalFunc(env, val, node)
+		case PolyFuncValue:
+			return EvalFunc(env, val.Fns[node.PolyIndex], node)
 		default:
 			return nil, fmt.Errorf("%s -> can't call not callable node", node.Position())
 		}
@@ -1433,6 +1469,43 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 	default:
 		return nil, fmt.Errorf("%s -> can't evaluate unexpected node '%s'", node.Position(), InspectNode(node))
 	}
+}
+
+func EvalFunc(env *Enviroment, val Value, node *CallNode) (Value, error) {
+	inputs := []Value{}
+	for _, input := range node.Inputs {
+		val, err := Eval(env, input)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, val)
+	}
+	switch val := val.(type) {
+	case BuiltinFuncValue:
+		res, err := val.Fn(inputs...)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return res, nil
+	case FuncValue:
+		fnEnv := NewEnviroment("fn", env.ClosestEnv(GlobalEK))
+		fnEnv.CloneSymbols(&val.Env)
+		for index, input := range val.Inputs {
+			sm, err := fnEnv.Lookup(input.Identifier.Value)
+			if err != nil {
+				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+			}
+			sm.Value = inputs[index]
+		}
+		res, err := Eval(fnEnv, val.Content)
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	default:
+		return nil, fmt.Errorf("%s -> can't call not callable node", node.Position())
+	}
+
 }
 
 // Runtime

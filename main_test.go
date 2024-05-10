@@ -9,7 +9,11 @@ import (
 )
 
 const program = `
+(def a (fn <string> "test")
+		(fn [num:int] <string> (itos num)))
+
 (def main (fn <unit> {
+	(println (a 10))
 	()
 }))
 `
