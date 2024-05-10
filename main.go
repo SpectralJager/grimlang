@@ -606,7 +606,7 @@ type (
 func (*_type) tp() {}
 
 var types = map[string]Type{
-	// "comp":   &CompType{},
+	"comp":   &CompType{},
 	"unit":   &UnitType{},
 	"int":    &IntegerType{},
 	"float":  &FloatType{},
@@ -646,14 +646,6 @@ func InspectType(typ Type) string {
 }
 
 func CompareTypes(a, b Type) bool {
-	if IsCompType(a) || IsCompType(b) {
-		return true
-	}
-	if IsListType(a) && IsListType(b) {
-		listA := a.(*ListType)
-		listB := b.(*ListType)
-		return CompareTypes(listA.Subtype, listB.Subtype)
-	}
 	return InspectType(a) == InspectType(b)
 }
 
@@ -706,23 +698,66 @@ func IsCompType(a Type) bool {
 	return false
 }
 
+// Comp type checking
+
+func CompTypeReplace(origin Type, replace Type) (Type, bool) {
+	switch typ := origin.(type) {
+	default:
+		return typ, false
+	case *CompType:
+		return replace, true
+	case *ListType:
+		res, ok := CompTypeReplace(typ.Subtype, replace)
+		if !ok {
+			return typ, false
+		}
+		typ.Subtype = res
+		return typ, true
+	case *FunctionType:
+		repl := CompTypeExptr(replace)
+		for index := range typ.Inputs {
+			input := typ.Inputs[index]
+			res, ok := CompTypeReplace(input, repl)
+			if !ok {
+				continue
+			}
+			typ.Inputs[index] = res
+		}
+		res, ok := CompTypeReplace(typ.Output, repl)
+		if ok {
+			typ.Output = res
+		}
+		return typ, false
+	}
+}
+
+func CompTypeExptr(replace Type) Type {
+	switch replace := replace.(type) {
+	case *ListType:
+		return replace.Subtype
+	default:
+		return replace
+	}
+
+}
+
 // Type checking
 
-func TypeChecke(env *Enviroment, node Node) (Type, error) {
+func TypeCheck(env *Enviroment, node Node) (Type, error) {
 	switch node := node.(type) {
 	case *ModuleNode:
 		moduleEnv := NewEnviroment("module", env)
 		moduleEnv.Kind = GlobalEK
 		moduleEnv.IsCollecting = true
 		for _, content := range node.Body {
-			_, err := TypeChecke(moduleEnv, content)
+			_, err := TypeCheck(moduleEnv, content)
 			if err != nil {
 				return nil, err
 			}
 		}
 		moduleEnv.IsCollecting = false
 		for _, content := range node.Body {
-			_, err := TypeChecke(moduleEnv, content)
+			_, err := TypeCheck(moduleEnv, content)
 			if err != nil {
 				return nil, err
 			}
@@ -733,7 +768,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 	case *FnNode:
 		if !env.IsCollecting {
 			fnEnv := node.Env
-			resTyp, err := TypeChecke(&fnEnv, node.Content)
+			resTyp, err := TypeCheck(&fnEnv, node.Content)
 			if err != nil {
 				return nil, err
 			}
@@ -745,13 +780,13 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		fnEnv := NewEnviroment("lambda", env)
 		inputs := []Type{}
 		for _, input := range node.Inputs {
-			inTyp, err := TypeChecke(fnEnv, input)
+			inTyp, err := TypeCheck(fnEnv, input)
 			if err != nil {
 				return nil, err
 			}
 			inputs = append(inputs, inTyp)
 		}
-		output, err := TypeChecke(fnEnv, node.Output)
+		output, err := TypeCheck(fnEnv, node.Output)
 		if err != nil {
 			return nil, err
 		}
@@ -783,7 +818,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		typ, err := TypeChecke(env, node.Constant)
+		typ, err := TypeCheck(env, node.Constant)
 		if err != nil {
 			return nil, err
 		}
@@ -810,12 +845,12 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 	case *UnitNode:
 		return types["unit"], nil
 	case *ListNode:
-		subtype, err := TypeChecke(env, node.SubType)
+		subtype, err := TypeCheck(env, node.SubType)
 		if err != nil {
 			return nil, err
 		}
 		for _, item := range node.Items {
-			itemTyp, err := TypeChecke(env, item)
+			itemTyp, err := TypeCheck(env, item)
 			if err != nil {
 				return nil, err
 			}
@@ -848,7 +883,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		}
 		return sm.Type, nil
 	case *InputNode:
-		typ, err := TypeChecke(env, node.Datatype)
+		typ, err := TypeCheck(env, node.Datatype)
 		if err != nil {
 			return nil, err
 		}
@@ -869,17 +904,17 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		fnEnv := NewEnviroment("lambda", env)
 		inputs := []Type{}
 		for _, input := range node.Inputs {
-			inTyp, err := TypeChecke(fnEnv, input)
+			inTyp, err := TypeCheck(fnEnv, input)
 			if err != nil {
 				return nil, err
 			}
 			inputs = append(inputs, inTyp)
 		}
-		output, err := TypeChecke(fnEnv, node.Output)
+		output, err := TypeCheck(fnEnv, node.Output)
 		if err != nil {
 			return nil, err
 		}
-		resTyp, err := TypeChecke(fnEnv, node.Content)
+		resTyp, err := TypeCheck(fnEnv, node.Content)
 		if err != nil {
 			return nil, err
 		}
@@ -893,7 +928,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		}
 		return node.Type, nil
 	case *SetNode:
-		contType, err := TypeChecke(env, node.Content)
+		contType, err := TypeCheck(env, node.Content)
 		if err != nil {
 			return nil, err
 		}
@@ -913,7 +948,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		}
 		return types["unit"], nil
 	case *VarNode:
-		contType, err := TypeChecke(env, node.Content)
+		contType, err := TypeCheck(env, node.Content)
 		if err != nil {
 			return nil, err
 		}
@@ -933,7 +968,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		}
 		return types["unit"], nil
 	case *DefNode:
-		contType, err := TypeChecke(env, node.Content)
+		contType, err := TypeCheck(env, node.Content)
 		if err != nil {
 			return nil, err
 		}
@@ -954,7 +989,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 	case *BlockNode:
 		blockEnv := NewEnviroment("block", env)
 		for index, content := range node.Body {
-			typ, err := TypeChecke(blockEnv, content)
+			typ, err := TypeCheck(blockEnv, content)
 			if err != nil {
 				return nil, err
 			}
@@ -966,7 +1001,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		fmt.Println(blockEnv.Inspect())
 		return node.ReturnType, nil
 	case *CallNode:
-		typ, err := TypeChecke(env, node.Callable)
+		typ, err := TypeCheck(env, node.Callable)
 		if err != nil {
 			return nil, err
 		}
@@ -977,12 +1012,21 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		if fnTyp.Output == nil {
 			return nil, fmt.Errorf("%s -> function should contain return type", node.Position())
 		}
-		node.ReturnType = fnTyp.Output
 		if len(node.Inputs) != len(fnTyp.Inputs) {
 			return nil, fmt.Errorf("%s -> number of inputs mismatched", node.Position())
 		}
+		if len(fnTyp.Inputs) != 0 {
+			compTyp, err := TypeCheck(env, node.Inputs[0])
+			if err != nil {
+				return nil, err
+			}
+			fmt.Println("before: ", InspectType(fnTyp))
+			res, _ := CompTypeReplace(fnTyp, compTyp)
+			fmt.Println("after: ", InspectType(res))
+			fnTyp = res.(*FunctionType)
+		}
 		for index, input := range node.Inputs {
-			inTyp, err := TypeChecke(env, input)
+			inTyp, err := TypeCheck(env, input)
 			if err != nil {
 				return nil, err
 			}
@@ -990,16 +1034,17 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 				return nil, fmt.Errorf("%s -> #%d input type mismatched", input.Position(), index)
 			}
 		}
+		node.ReturnType = fnTyp.Output
 		return node.ReturnType, nil
 	case *CaseNode:
-		condType, err := TypeChecke(env, node.Condition)
+		condType, err := TypeCheck(env, node.Condition)
 		if err != nil {
 			return nil, err
 		}
 		if !IsBooleanType(condType) {
 			return nil, fmt.Errorf("%s -> condition type should be bool, got %s", node.Position(), InspectType(condType))
 		}
-		contType, err := TypeChecke(env, node.Content)
+		contType, err := TypeCheck(env, node.Content)
 		if err != nil {
 			return nil, err
 		}
@@ -1008,7 +1053,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 	case *CondNode:
 		csType := Type(types["unit"])
 		for i, cs := range node.Cases {
-			typ, err := TypeChecke(env, cs)
+			typ, err := TypeCheck(env, cs)
 			if err != nil {
 				return nil, err
 			}
@@ -1020,7 +1065,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 				return nil, fmt.Errorf("%s -> content type of cases should be same, expect %s -- got %s", cs.Position(), InspectType(csType), InspectType(typ))
 			}
 		}
-		elseType, err := TypeChecke(env, node.Else)
+		elseType, err := TypeCheck(env, node.Else)
 		if err != nil {
 			return nil, err
 		}
@@ -1030,7 +1075,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 		node.CasesType = csType
 		return csType, nil
 	case *OperationNode:
-		opTyp, err := TypeChecke(env, node.Operands[0])
+		opTyp, err := TypeCheck(env, node.Operands[0])
 		if err != nil {
 			return nil, err
 		}
@@ -1070,7 +1115,7 @@ func TypeChecke(env *Enviroment, node Node) (Type, error) {
 
 func TypeCheckOperatorOperands(env *Enviroment, node *OperationNode) (Type, error) {
 	for index, operand := range node.Operands {
-		typ, err := TypeChecke(env, operand)
+		typ, err := TypeCheck(env, operand)
 		if err != nil {
 			return nil, err
 		}
