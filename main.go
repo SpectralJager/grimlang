@@ -698,6 +698,56 @@ func IsCompType(a Type) bool {
 	return false
 }
 
+// Comp type operations
+
+func ContainsComp(a Type) bool {
+	switch a := a.(type) {
+	default:
+		return false
+	case *CompType:
+		return true
+	case *ListType:
+		return ContainsComp(a.Subtype)
+	case *FunctionType:
+		for _, input := range a.Inputs {
+			if ContainsComp(input) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func CompTypeCheck(src Type, trg Type) (Type, bool) {
+	switch src := src.(type) {
+	default:
+		return src, false
+	case *CompType:
+		return trg, true
+	case *ListType:
+		if IsListType(trg) {
+			return CompTypeCheck(src.Subtype, trg.(*ListType).Subtype)
+		}
+		return src, false
+	}
+}
+
+func ReplaceComp(src Type, trg Type) (Type, bool) {
+	switch src := src.(type) {
+	default:
+		return src, false
+	case *CompType:
+		return trg, true
+	case *ListType:
+		lst := &ListType{}
+		if _, ok := ReplaceComp(src.Subtype, trg); ok {
+			lst.Subtype = trg
+			return lst, true
+		}
+		return src, false
+	}
+}
+
 // Type checking
 
 func TypeCheck(env *Enviroment, node Node) (Type, error) {
@@ -973,14 +1023,30 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		if len(node.Inputs) != len(fnTyp.Inputs) {
 			return nil, fmt.Errorf("%s -> number of inputs mismatched", node.Position())
 		}
+		var isOutReplaced bool
 		for index, input := range node.Inputs {
 			inTyp, err := TypeCheck(env, input)
 			if err != nil {
 				return nil, err
 			}
-			if !CompareTypes(fnTyp.Inputs[index], inTyp) {
+			if ContainsComp(fnTyp.Inputs[index]) {
+				res, ok := CompTypeCheck(fnTyp.Inputs[index], inTyp)
+				if !ok {
+					return nil, fmt.Errorf("%s -> #%d input can't check comp", input.Position(), index)
+				}
+				if ContainsComp(fnTyp.Output) && !isOutReplaced {
+					node.ReturnType, ok = ReplaceComp(fnTyp.Output, res)
+					if !ok {
+						return nil, fmt.Errorf("%s -> #%d input can't replace comp output", node.Position(), index)
+					}
+					isOutReplaced = true
+				}
+			} else if !CompareTypes(fnTyp.Inputs[index], inTyp) {
 				return nil, fmt.Errorf("%s -> #%d input type mismatched", input.Position(), index)
 			}
+		}
+		if ContainsComp(fnTyp.Output) && !isOutReplaced {
+			return nil, fmt.Errorf("%s -> comp output not replaced", node.Position())
 		}
 		return node.ReturnType, nil
 	case *CaseNode:
@@ -1806,7 +1872,7 @@ func InsertBuiltinSymbols(env *Enviroment) {
 			Output: &ListType{Subtype: &CompType{}},
 		},
 		Value: BuiltinFuncValue{
-			Fn: Ltos,
+			Fn: Lappend,
 		},
 		IsBuiltin: true,
 	})
