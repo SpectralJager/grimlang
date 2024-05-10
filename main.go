@@ -1023,7 +1023,7 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		if len(node.Inputs) != len(fnTyp.Inputs) {
 			return nil, fmt.Errorf("%s -> number of inputs mismatched", node.Position())
 		}
-		var isOutReplaced bool
+		var comp Type
 		for index, input := range node.Inputs {
 			inTyp, err := TypeCheck(env, input)
 			if err != nil {
@@ -1034,19 +1034,25 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 				if !ok {
 					return nil, fmt.Errorf("%s -> #%d input can't check comp", input.Position(), index)
 				}
-				if ContainsComp(fnTyp.Output) && !isOutReplaced {
-					node.ReturnType, ok = ReplaceComp(fnTyp.Output, res)
-					if !ok {
-						return nil, fmt.Errorf("%s -> #%d input can't replace comp output", node.Position(), index)
+				if comp == nil {
+					comp = res
+				} else {
+					if !CompareTypes(comp, res) {
+						return nil, fmt.Errorf("%s -> #%d input comp type mismatched", input.Position(), index)
 					}
-					isOutReplaced = true
 				}
 			} else if !CompareTypes(fnTyp.Inputs[index], inTyp) {
 				return nil, fmt.Errorf("%s -> #%d input type mismatched", input.Position(), index)
 			}
 		}
-		if ContainsComp(fnTyp.Output) && !isOutReplaced {
-			return nil, fmt.Errorf("%s -> comp output not replaced", node.Position())
+		if ContainsComp(fnTyp.Output) {
+			if comp == nil {
+				return nil, fmt.Errorf("%s -> can't replace comp output without comp input", node.Position())
+			}
+			node.ReturnType, ok = ReplaceComp(fnTyp.Output, comp)
+			if !ok {
+				return nil, fmt.Errorf("%s -> can't replace comp output", node.Position())
+			}
 		}
 		return node.ReturnType, nil
 	case *CaseNode:

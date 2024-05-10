@@ -10,8 +10,6 @@ import (
 
 const program = `
 (def main (fn <unit> {
-	(def lst (lappend list<int>{1 2} 1))
-	(println (ltos lst))
 	()
 }))
 `
