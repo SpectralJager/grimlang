@@ -39,3 +39,7 @@ func TestInterpreter(t *testing.T) {
 	}
 	fmt.Printf("result: %s of %s\n", InspectValue(resVal), InspectType(resTyp))
 }
+
+func TestParser(t *testing.T) {
+	fmt.Println(Parser.String())
+}

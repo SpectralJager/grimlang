@@ -41,6 +41,7 @@ var (
 			{Name: "Var", Pattern: `set`},
 			{Name: "Cond", Pattern: `cond`},
 			{Name: "Case", Pattern: `case`},
+			{Name: "Fn", Pattern: `fn`},
 
 			{Name: "IntT", Pattern: `int`},
 			{Name: "BoolT", Pattern: `bool`},
