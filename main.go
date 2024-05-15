@@ -43,13 +43,13 @@ var (
 			{Name: "Case", Pattern: `case`},
 			{Name: "Fn", Pattern: `fn`},
 
-			{Name: "IntT", Pattern: `int`},
-			{Name: "BoolT", Pattern: `bool`},
-			{Name: "StringT", Pattern: `string`},
-			{Name: "FloatT", Pattern: `float`},
-			{Name: "UnitT", Pattern: `unit`},
-			{Name: "CompT", Pattern: `comp`},
-			{Name: "ListT", Pattern: `list`},
+			// {Name: "IntT", Pattern: `int`},
+			// {Name: "BoolT", Pattern: `bool`},
+			// {Name: "StringT", Pattern: `string`},
+			// {Name: "FloatT", Pattern: `float`},
+			// {Name: "UnitT", Pattern: `unit`},
+			// {Name: "CompT", Pattern: `comp`},
+			// {Name: "ListT", Pattern: `list`},
 
 			{Name: "StringStart", Pattern: `"`, Action: lexer.Push("String")},
 			{Name: "Boolean", Pattern: `(true|false)`},
@@ -1055,7 +1055,7 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 				finded := true
 				for i, input := range fnTyp.Inputs {
 					if !CompareTypes(input, inputs[i]) {
-						finded = true
+						finded = false
 						break
 					}
 				}

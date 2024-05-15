@@ -9,11 +9,15 @@ import (
 )
 
 const program = `
-(def a (fn <string> "test")
-		(fn [num:int] <string> (itos num)))
+(def stringer 
+    (fn <string> "stringer")
+    (fn [str:string] <string> (++ "stringer:" str))
+    (fn [it:int] <string> (stringer (itos it)))
+    (fn [fl:float] <string> (stringer (ftos fl)))
+)
 
 (def main (fn <unit> {
-	(println (a 10))
+	(println (stringer 10.12))
 	()
 }))
 `
