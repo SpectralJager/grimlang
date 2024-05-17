@@ -116,6 +116,8 @@ var (
 		),
 		participle.Union[DatatypeUnionNode](
 			&PrimitiveNode{},
+			&CompositeNode{},
+			&FnTypeNode{},
 		),
 		participle.Union[ExpressionUnionNode](
 			&OperationNode{},
@@ -137,6 +139,7 @@ var (
 		participle.Union[IterableUnionNode](
 			&ListNode{},
 			&SymbolNode{},
+			&CallNode{},
 		),
 	)
 )
@@ -264,6 +267,16 @@ type (
 	PrimitiveNode struct {
 		_node
 		Datatype string `parser:"@('int'|'float'|'string'|'bool'|'unit')"`
+	}
+	CompositeNode struct {
+		_node
+		Datatype string            `parser:"@('list')"`
+		SubType  DatatypeUnionNode `parser:"'<' @@ '>'"`
+	}
+	FnTypeNode struct {
+		_node
+		Inputs []DatatypeUnionNode `parser:"'[' @@* ']'"`
+		Output DatatypeUnionNode   `parser:"'<' @@ '>'"`
 	}
 	SymbolNode struct {
 		_node
@@ -964,6 +977,34 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		default:
 			return nil, fmt.Errorf("%s -> unexpected primitive type '%s'", node.Position(), node.Datatype)
 		}
+	case *CompositeNode:
+		switch node.Datatype {
+		case "list":
+			subTyp, err := TypeCheck(env, node.SubType)
+			if err != nil {
+				return nil, err
+			}
+			return &ListType{Subtype: subTyp}, nil
+		default:
+			return nil, fmt.Errorf("%s -> unexpected composite type '%s'", node.Position(), node.Datatype)
+		}
+	case *FnTypeNode:
+		inputs := []Type{}
+		for _, in := range node.Inputs {
+			inTyp, err := TypeCheck(env, in)
+			if err != nil {
+				return nil, err
+			}
+			inputs = append(inputs, inTyp)
+		}
+		output, err := TypeCheck(env, node.Output)
+		if err != nil {
+			return nil, err
+		}
+		return &FunctionType{
+			Inputs: inputs,
+			Output: output,
+		}, nil
 	case *SymbolNode:
 		sm, err := env.LookupAll(node.Value)
 		if err != nil {

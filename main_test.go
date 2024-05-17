@@ -9,13 +9,21 @@ import (
 )
 
 const program = `
-(def main (fn <unit> {
-	(def lst1 (for [i = 0 : 10 : 1] i))
-	(def lst2 (range [itm : lst1] (* itm 2)))
-	(range [itm : lst2]{
-		(println (itos itm))
+(def mapper (fn [lst:list<int> f:[int]<int>] <list<int>> {
+	(var newLst = list<int>{})
+	(range [itm : lst] {
+		(def res (f itm))
+		(set newLst = (lappend newLst res))
 		()
 	})
+	newLst
+}))
+
+(def main (fn <unit> {
+	(println (ltos (mapper 
+		list<int>{1 2 3}
+		(fn [itm:int] <int> (* itm 2))
+	)))
 	()
 }))
 `
