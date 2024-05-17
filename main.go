@@ -41,6 +41,9 @@ var (
 			{Name: "Var", Pattern: `set`},
 			{Name: "Cond", Pattern: `cond`},
 			{Name: "Case", Pattern: `case`},
+			{Name: "While", Pattern: `while`},
+			{Name: "For", Pattern: `for`},
+			{Name: "Range", Pattern: `range`},
 			{Name: "Fn", Pattern: `fn`},
 
 			// {Name: "IntT", Pattern: `int`},
@@ -106,6 +109,9 @@ var (
 			&DefNode{},
 			&VarNode{},
 			&SetNode{},
+			&WhileNode{},
+			&ForNode{},
+			&RangeNode{},
 			&CallNode{},
 		),
 		participle.Union[DatatypeUnionNode](
@@ -123,7 +129,14 @@ var (
 			&CondNode{},
 			&CaseNode{},
 			&LambdaNode{},
+			&WhileNode{},
+			&ForNode{},
+			&RangeNode{},
 			&CallNode{},
+		),
+		participle.Union[IterableUnionNode](
+			&ListNode{},
+			&SymbolNode{},
 		),
 	)
 )
@@ -138,6 +151,7 @@ type (
 	ModuleUnionNode     interface{ Node }
 	DatatypeUnionNode   interface{ Node }
 	ConstantUnionNode   interface{ Node }
+	IterableUnionNode   interface{ Node }
 	_node               struct {
 		Pos lexer.Position
 	}
@@ -158,6 +172,31 @@ type (
 		Operands      []ExpressionUnionNode `parser:"@@ @@+ ')'"`
 		OperationType Type
 		OperandsType  Type
+	}
+	WhileNode struct {
+		_node
+		Condition ExpressionUnionNode `parser:"'(' 'while' @@"`
+		Content   ExpressionUnionNode `parser:"@@ ')'"`
+		Env       Enviroment
+		Typ       Type
+	}
+	RangeNode struct {
+		_node
+		IndexIdent *SymbolNode         `parser:"'(' 'range' '[' @@"`
+		Iterable   IterableUnionNode   `parser:"':' @@ ']'"`
+		Content    ExpressionUnionNode `parser:"@@ ')'"`
+		Env        Enviroment
+		Typ        Type
+	}
+	ForNode struct {
+		_node
+		IndexIdent *SymbolNode         `parser:"'(' 'for' '[' @@"`
+		Start      ExpressionUnionNode `parser:"'=' @@"`
+		End        ExpressionUnionNode `parser:"':' @@"`
+		Step       ExpressionUnionNode `parser:"':' @@ ']'"`
+		Content    ExpressionUnionNode `parser:"@@ ')'"`
+		Env        Enviroment
+		Typ        Type
 	}
 	CondNode struct {
 		_node
@@ -305,6 +344,12 @@ func InspectNode(node Node) string {
 		return "list_node"
 	case *OperationNode:
 		return fmt.Sprintf("operation_%s", node.Operation)
+	case *WhileNode:
+		return "while_node"
+	case *RangeNode:
+		return "range_node"
+	case *ForNode:
+		return "for_node"
 	default:
 		return "invalid_node"
 	}
@@ -663,12 +708,25 @@ func InspectType(typ Type) string {
 	}
 }
 
-func CompareTypes(a, b Type) bool {
-	return InspectType(a) == InspectType(b)
+func CompareTypes(types ...Type) bool {
+	if len(types) < 2 {
+		return false
+	}
+	cmp := InspectType(types[0])
+	for _, tp := range types[1:] {
+		if cmp != InspectType(tp) {
+			return false
+		}
+	}
+	return true
 }
 
 func IsNumberType(a Type) bool {
 	return IsIntegerType(a) || IsFloatType(a)
+}
+
+func IsIterableType(a Type) bool {
+	return IsListType(a)
 }
 
 func IsComparableType(a Type) bool {
@@ -1110,6 +1168,87 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		}
 		node.CasesType = csType
 		return csType, nil
+	case *WhileNode:
+		condType, err := TypeCheck(env, node.Condition)
+		if err != nil {
+			return nil, err
+		}
+		if !IsBooleanType(condType) {
+			return nil, fmt.Errorf("%s -> while condition should be bool type", node.Position())
+		}
+		contTyp, err := TypeCheck(env, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		if IsUnitType(contTyp) {
+			return contTyp, nil
+		}
+		node.Typ = &ListType{Subtype: contTyp}
+		return node.Typ, nil
+	case *ForNode:
+		startTyp, err := TypeCheck(env, node.Start)
+		if err != nil {
+			return nil, err
+		}
+		endTyp, err := TypeCheck(env, node.End)
+		if err != nil {
+			return nil, err
+		}
+		stepTyp, err := TypeCheck(env, node.End)
+		if err != nil {
+			return nil, err
+		}
+		if !IsNumberType(startTyp) || !IsNumberType(endTyp) || !IsNumberType(stepTyp) {
+			return nil, fmt.Errorf("%s -> start, end and step should be numbers", node.Position())
+		}
+		if !CompareTypes(startTyp, endTyp, stepTyp) {
+			return nil, fmt.Errorf("%s -> start, end and step should be same type", node.Position())
+		}
+		forEnv := NewEnviroment("for", env)
+		forEnv.Insert(
+			&Symbol{Ident: node.IndexIdent, Type: startTyp},
+		)
+		contTyp, err := TypeCheck(forEnv, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		node.Env = *forEnv
+		fmt.Println(forEnv.Inspect())
+		if IsUnitType(contTyp) {
+			return contTyp, nil
+		}
+		node.Typ = &ListType{Subtype: contTyp}
+		return node.Typ, nil
+	case *RangeNode:
+		iterableTyp, err := TypeCheck(env, node.Iterable)
+		if err != nil {
+			return nil, err
+		}
+		if !IsIterableType(iterableTyp) {
+			return nil, fmt.Errorf("%s -> should be iterable type", node.Iterable.Position())
+		}
+		var itemTyp Type
+		switch iterableTyp := iterableTyp.(type) {
+		case *ListType:
+			itemTyp = iterableTyp.Subtype
+		default:
+			return nil, fmt.Errorf("%s -> unexpected iterable type", node.Iterable.Position())
+		}
+		rangeEnv := NewEnviroment("range", env)
+		rangeEnv.Insert(
+			&Symbol{Ident: node.IndexIdent, Type: itemTyp},
+		)
+		contTyp, err := TypeCheck(rangeEnv, node.Content)
+		if err != nil {
+			return nil, err
+		}
+		node.Env = *rangeEnv
+		fmt.Println(rangeEnv.Inspect())
+		if IsUnitType(contTyp) {
+			return contTyp, nil
+		}
+		node.Typ = &ListType{Subtype: contTyp}
+		return node.Typ, nil
 	case *OperationNode:
 		opTyp, err := TypeCheck(env, node.Operands[0])
 		if err != nil {
@@ -1360,6 +1499,149 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 			}
 		}
 		return Eval(env, node.Else)
+	case *WhileNode:
+		var resList ListValue
+		var genList bool
+		if IsListType(node.Typ) {
+			genList = true
+		}
+		for {
+			condVal, err := Eval(env, node.Condition)
+			if err != nil {
+				return nil, err
+			}
+			cond, err := ValueToBool(condVal)
+			if err != nil {
+				return nil, err
+			}
+			if !cond.Value {
+				break
+			}
+			res, err := Eval(env, node.Content)
+			if err != nil {
+				return nil, err
+			}
+			if genList {
+				resList.Items = append(resList.Items, res)
+			}
+		}
+		if genList {
+			return resList, nil
+		}
+		return UnitValue{}, nil
+	case *ForNode:
+		startVal, err := Eval(env, node.Start)
+		if err != nil {
+			return nil, err
+		}
+		endVal, err := Eval(env, node.End)
+		if err != nil {
+			return nil, err
+		}
+		stepVal, err := Eval(env, node.Step)
+		if err != nil {
+			return nil, err
+		}
+		forEnv := NewEnviroment("for", env)
+		forEnv.CloneSymbols(&node.Env)
+		var resList ListValue
+		var genList bool
+		if IsListType(node.Typ) {
+			genList = true
+		}
+		index, err := forEnv.Lookup(node.IndexIdent.Value)
+		if err != nil {
+			return nil, err
+		}
+		index.Value = startVal
+	breakList:
+		for {
+			switch index.Type.(type) {
+			default:
+				return nil, fmt.Errorf("unexpected index type")
+			case *IntegerType:
+				indexInt, _ := ValueToInteger(index.Value)
+				endVal, _ := ValueToInteger(endVal)
+				cond := LessInt(indexInt, endVal)
+				condBool, err := ValueToBool(cond)
+				if err != nil {
+					return nil, err
+				}
+				if !condBool.Value {
+					break breakList
+				}
+			case *FloatType:
+				indexInt, _ := ValueToFloat(index.Value)
+				endVal, _ := ValueToFloat(endVal)
+				cond := LessFloat(indexInt, endVal)
+				condBool, err := ValueToBool(cond)
+				if err != nil {
+					return nil, err
+				}
+				if !condBool.Value {
+					break breakList
+				}
+			}
+			res, err := Eval(forEnv, node.Content)
+			if err != nil {
+				return nil, err
+			}
+			if genList {
+				resList.Items = append(resList.Items, res)
+			}
+			switch index.Type.(type) {
+			default:
+				return nil, fmt.Errorf("unexpected index type")
+			case *IntegerType:
+				indexInt, _ := ValueToInteger(index.Value)
+				stepInt, _ := ValueToInteger(stepVal)
+				res := AddInt(indexInt, stepInt)
+				index.Value = res
+			case *FloatType:
+				indexInt, _ := ValueToFloat(index.Value)
+				stepInt, _ := ValueToFloat(stepVal)
+				res := AddFloat(indexInt, stepInt)
+				index.Value = res
+			}
+		}
+		if genList {
+			return resList, nil
+		}
+		return UnitValue{}, nil
+	case *RangeNode:
+		rangeEnv := NewEnviroment("range", env)
+		rangeEnv.CloneSymbols(&node.Env)
+		var resList ListValue
+		var genList bool
+		if IsListType(node.Typ) {
+			genList = true
+		}
+		index, err := rangeEnv.Lookup(node.IndexIdent.Value)
+		if err != nil {
+			return nil, err
+		}
+		val, err := Eval(env, node.Iterable)
+		if err != nil {
+			return nil, err
+		}
+		iterable, err := ValueToList(val)
+		if err != nil {
+			return nil, err
+		}
+		for _, itm := range iterable.Items {
+			index.Value = itm
+			res, err := Eval(rangeEnv, node.Content)
+			if err != nil {
+				return nil, err
+			}
+			if genList {
+				resList.Items = append(resList.Items, res)
+			}
+		}
+		if genList {
+			return resList, nil
+		}
+		return UnitValue{}, nil
 	case *OperationNode:
 		operands := []Value{}
 		for _, operand := range node.Operands {

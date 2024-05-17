@@ -9,15 +9,13 @@ import (
 )
 
 const program = `
-(def stringer 
-    (fn <string> "stringer")
-    (fn [str:string] <string> (++ "stringer:" str))
-    (fn [it:int] <string> (stringer (itos it)))
-    (fn [fl:float] <string> (stringer (ftos fl)))
-)
-
 (def main (fn <unit> {
-	(println (stringer 10.12))
+	(def lst1 (for [i = 0 : 10 : 1] i))
+	(def lst2 (range [itm : lst1] (* itm 2)))
+	(range [itm : lst2]{
+		(println (itos itm))
+		()
+	})
 	()
 }))
 `
