@@ -20,9 +20,11 @@ const program = `
 }))
 
 (def main (fn <unit> {
+	(def mp 
+		(fn [itm:int] <int> (* itm itm)))
 	(println (ltos (mapper 
-		list<int>{1 2 3}
-		(fn [itm:int] <int> (* itm 2))
+		(for [i = 0 : 10 : 2] i)
+		mp
 	)))
 	()
 }))
