@@ -1,36 +1,41 @@
 <mxfile host="65bd71144e">
     <diagram id="b3I6s7pDpbtl4KrO5DEr" name="Page-2">
-        <mxGraphModel dx="1386" dy="917" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+        <mxGraphModel dx="1147" dy="917" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-1" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="81JCwE_kcM6ge_QoEcJj-2" target="81JCwE_kcM6ge_QoEcJj-5">
+                <mxCell id="5" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="81JCwE_kcM6ge_QoEcJj-2" target="3">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-2" value="Начало" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-                    <mxGeometry x="245" y="40" width="90" height="40" as="geometry"/>
+                <mxCell id="81JCwE_kcM6ge_QoEcJj-2" value="Начало" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+                    <mxGeometry x="245" y="50" width="90" height="40" as="geometry"/>
                 </mxCell>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-3" value="Конец" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-                    <mxGeometry x="450" y="430" width="90" height="40" as="geometry"/>
+                <mxCell id="81JCwE_kcM6ge_QoEcJj-3" value="Конец" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+                    <mxGeometry x="245" y="330" width="90" height="40" as="geometry"/>
                 </mxCell>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-4" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="81JCwE_kcM6ge_QoEcJj-5" target="81JCwE_kcM6ge_QoEcJj-7">
-                    <mxGeometry relative="1" as="geometry"/>
-                </mxCell>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-5" value="Считать &lt;br&gt;исходный код" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;" vertex="1" parent="1">
-                    <mxGeometry x="230" y="120" width="120" height="60" as="geometry"/>
-                </mxCell>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-7" value="Разбить исходный код на токены" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-                    <mxGeometry x="230" y="230" width="120" height="60" as="geometry"/>
-                </mxCell>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-10" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="81JCwE_kcM6ge_QoEcJj-11">
+                <mxCell id="81JCwE_kcM6ge_QoEcJj-10" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="1" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <mxPoint x="495" y="207.5" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="81JCwE_kcM6ge_QoEcJj-12" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="81JCwE_kcM6ge_QoEcJj-13">
+                <mxCell id="81JCwE_kcM6ge_QoEcJj-12" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="1" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <mxPoint x="495" y="320" as="targetPoint"/>
                     </mxGeometry>
+                </mxCell>
+                <mxCell id="7" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="2">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="290" y="330" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="2" value="Вычисление основного элемента АСТ" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="230" y="230" width="120" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="6" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="3" target="2">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="3" value="Вычисление дочерних элементов" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="230" y="130" width="120" height="60" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>

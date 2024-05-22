@@ -859,7 +859,7 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 			}
 		}
 		node.Env = *moduleEnv
-		fmt.Println(moduleEnv.Inspect())
+		// fmt.Println(moduleEnv.Inspect())
 		return types["unit"], nil
 	case *FnNode:
 		if !env.IsCollecting {
@@ -1127,7 +1127,7 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 			}
 		}
 		node.Env = *blockEnv
-		fmt.Println(blockEnv.Inspect())
+		// fmt.Println(blockEnv.Inspect())
 		return node.ReturnType, nil
 	case *CallNode:
 		typ, err := TypeCheck(env, node.Callable)
@@ -1254,7 +1254,7 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 			return nil, err
 		}
 		node.Env = *forEnv
-		fmt.Println(forEnv.Inspect())
+		// fmt.Println(forEnv.Inspect())
 		if IsUnitType(contTyp) {
 			return contTyp, nil
 		}
@@ -1284,7 +1284,7 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 			return nil, err
 		}
 		node.Env = *rangeEnv
-		fmt.Println(rangeEnv.Inspect())
+		// fmt.Println(rangeEnv.Inspect())
 		if IsUnitType(contTyp) {
 			return contTyp, nil
 		}

@@ -9,23 +9,22 @@ import (
 )
 
 const program = `
-(def mapper (fn [lst:list<int> f:[int]<int>] <list<int>> {
-	(var newLst = list<int>{})
-	(range [itm : lst] {
-		(def res (f itm))
-		(set newLst = (lappend newLst res))
-		()
-	})
-	newLst
-}))
+(def printer
+	(fn [val:string] <unit> (println val))	
+	(fn [val:int] <unit> (println (itos val)))	
+	(fn [val:float] <unit> (println (ftos val)))	
+	(fn [val:bool] <unit> 
+		(println (cond
+			(case val "true")
+			"false")))	
+)
 
 (def main (fn <unit> {
-	(def mp 
-		(fn [itm:int] <int> (* itm itm)))
-	(println (ltos (mapper 
-		(for [i = 0 : 10 : 2] i)
-		mp
-	)))
+	(printer 10)
+	(printer 10.10)
+	(printer "10:hell")
+	(printer true)
+	(printer false)
 	()
 }))
 `
@@ -44,7 +43,7 @@ func TestInterpreter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println(builtin.Inspect())
+	// fmt.Println(builtin.Inspect())
 	resVal, err := Eval(builtin, resNode)
 	if err != nil {
 		t.Fatal(err)
