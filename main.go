@@ -45,6 +45,7 @@ var (
 			{Name: "For", Pattern: `for`},
 			{Name: "Range", Pattern: `range`},
 			{Name: "Fn", Pattern: `fn`},
+			{Name: "Record", Pattern: `record`},
 
 			// {Name: "IntT", Pattern: `int`},
 			// {Name: "BoolT", Pattern: `bool`},
@@ -117,6 +118,7 @@ var (
 		participle.Union[DatatypeUnionNode](
 			&PrimitiveNode{},
 			&CompositeNode{},
+			&RecordTypeNode{},
 			&FnTypeNode{},
 		),
 		participle.Union[ExpressionUnionNode](
@@ -237,6 +239,10 @@ type (
 		Identifier  *SymbolNode         `parser:"'(' 'def' @@"`
 		Content     ExpressionUnionNode `parser:"@@ ')'"`
 		ContentType Type
+	}
+	RecordTypeNode struct {
+		_node
+		Fields []*InputNode `parser:"'(' 'record' @@+ ')'"`
 	}
 	SetNode struct {
 		_node

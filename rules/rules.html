@@ -44,7 +44,7 @@ Diagram(Choice(0, Sequence(NonTerminal("SymbolNode", {href:"#SymbolNode"}), Term
 
 <h1 id="DatatypeUnionNode">DatatypeUnionNode</h1>
 <script>
-Diagram(Choice(0, Sequence(NonTerminal("PrimitiveNode", {href:"#PrimitiveNode"})))).addTo();
+Diagram(Choice(0, Sequence(NonTerminal("PrimitiveNode", {href:"#PrimitiveNode"})), Sequence(NonTerminal("CompositeNode", {href:"#CompositeNode"})), Sequence(NonTerminal("FnTypeNode", {href:"#FnTypeNode"})))).addTo();
 </script>
 
 <h1 id="PrimitiveNode">PrimitiveNode</h1>
@@ -52,9 +52,24 @@ Diagram(Choice(0, Sequence(NonTerminal("PrimitiveNode", {href:"#PrimitiveNode"})
 Diagram(Choice(0, Sequence(Choice(0, Sequence(Terminal("int")), Sequence(Terminal("float")), Sequence(Terminal("string")), Sequence(Terminal("bool")), Sequence(Terminal("unit")))))).addTo();
 </script>
 
+<h1 id="CompositeNode">CompositeNode</h1>
+<script>
+Diagram(Choice(0, Sequence(Terminal("list"), Terminal("<"), NonTerminal("DatatypeUnionNode", {href:"#DatatypeUnionNode"}), Terminal(">")))).addTo();
+</script>
+
+<h1 id="RecordTypeNode">RecordTypeNode</h1>
+<script>
+Diagram(Choice(0, Sequence(Terminal("("), Terminal("record"), OneOrMore(NonTerminal("InputNode", {href:"#InputNode"})), Terminal(")")))).addTo();
+</script>
+
+<h1 id="FnTypeNode">FnTypeNode</h1>
+<script>
+Diagram(Choice(0, Sequence(Terminal("["), ZeroOrMore(NonTerminal("DatatypeUnionNode", {href:"#DatatypeUnionNode"})), Terminal("]"), Terminal("<"), NonTerminal("DatatypeUnionNode", {href:"#DatatypeUnionNode"}), Terminal(">")))).addTo();
+</script>
+
 <h1 id="ExpressionUnionNode">ExpressionUnionNode</h1>
 <script>
-Diagram(Choice(0, Sequence(NonTerminal("OperationNode", {href:"#OperationNode"})), Sequence(NonTerminal("ListNode", {href:"#ListNode"})), Sequence(NonTerminal("SymbolNode", {href:"#SymbolNode"})), Sequence(NonTerminal("IntegerNode", {href:"#IntegerNode"})), Sequence(NonTerminal("FloatNode", {href:"#FloatNode"})), Sequence(NonTerminal("BoolNode", {href:"#BoolNode"})), Sequence(NonTerminal("StringNode", {href:"#StringNode"})), Sequence(NonTerminal("BlockNode", {href:"#BlockNode"})), Sequence(NonTerminal("CondNode", {href:"#CondNode"})), Sequence(NonTerminal("CaseNode", {href:"#CaseNode"})), Sequence(NonTerminal("LambdaNode", {href:"#LambdaNode"})), Sequence(NonTerminal("CallNode", {href:"#CallNode"})))).addTo();
+Diagram(Choice(0, Sequence(NonTerminal("OperationNode", {href:"#OperationNode"})), Sequence(NonTerminal("ListNode", {href:"#ListNode"})), Sequence(NonTerminal("SymbolNode", {href:"#SymbolNode"})), Sequence(NonTerminal("IntegerNode", {href:"#IntegerNode"})), Sequence(NonTerminal("FloatNode", {href:"#FloatNode"})), Sequence(NonTerminal("BoolNode", {href:"#BoolNode"})), Sequence(NonTerminal("StringNode", {href:"#StringNode"})), Sequence(NonTerminal("BlockNode", {href:"#BlockNode"})), Sequence(NonTerminal("CondNode", {href:"#CondNode"})), Sequence(NonTerminal("CaseNode", {href:"#CaseNode"})), Sequence(NonTerminal("LambdaNode", {href:"#LambdaNode"})), Sequence(NonTerminal("WhileNode", {href:"#WhileNode"})), Sequence(NonTerminal("ForNode", {href:"#ForNode"})), Sequence(NonTerminal("RangeNode", {href:"#RangeNode"})), Sequence(NonTerminal("CallNode", {href:"#CallNode"})))).addTo();
 </script>
 
 <h1 id="OperationNode">OperationNode</h1>
@@ -94,7 +109,7 @@ Diagram(Choice(0, Sequence(Terminal("{"), OneOrMore(NonTerminal("BlockUnionNode"
 
 <h1 id="BlockUnionNode">BlockUnionNode</h1>
 <script>
-Diagram(Choice(0, Sequence(NonTerminal("OperationNode", {href:"#OperationNode"})), Sequence(NonTerminal("UnitNode", {href:"#UnitNode"})), Sequence(NonTerminal("SymbolNode", {href:"#SymbolNode"})), Sequence(NonTerminal("CondNode", {href:"#CondNode"})), Sequence(NonTerminal("DefNode", {href:"#DefNode"})), Sequence(NonTerminal("VarNode", {href:"#VarNode"})), Sequence(NonTerminal("SetNode", {href:"#SetNode"})), Sequence(NonTerminal("CallNode", {href:"#CallNode"})))).addTo();
+Diagram(Choice(0, Sequence(NonTerminal("OperationNode", {href:"#OperationNode"})), Sequence(NonTerminal("UnitNode", {href:"#UnitNode"})), Sequence(NonTerminal("SymbolNode", {href:"#SymbolNode"})), Sequence(NonTerminal("CondNode", {href:"#CondNode"})), Sequence(NonTerminal("DefNode", {href:"#DefNode"})), Sequence(NonTerminal("VarNode", {href:"#VarNode"})), Sequence(NonTerminal("SetNode", {href:"#SetNode"})), Sequence(NonTerminal("WhileNode", {href:"#WhileNode"})), Sequence(NonTerminal("ForNode", {href:"#ForNode"})), Sequence(NonTerminal("RangeNode", {href:"#RangeNode"})), Sequence(NonTerminal("CallNode", {href:"#CallNode"})))).addTo();
 </script>
 
 <h1 id="UnitNode">UnitNode</h1>
@@ -125,6 +140,26 @@ Diagram(Choice(0, Sequence(Terminal("("), Terminal("var"), NonTerminal("SymbolNo
 <h1 id="SetNode">SetNode</h1>
 <script>
 Diagram(Choice(0, Sequence(Terminal("("), Terminal("set"), NonTerminal("SymbolNode", {href:"#SymbolNode"}), Terminal("="), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), Terminal(")")))).addTo();
+</script>
+
+<h1 id="WhileNode">WhileNode</h1>
+<script>
+Diagram(Choice(0, Sequence(Terminal("("), Terminal("while"), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), Terminal(")")))).addTo();
+</script>
+
+<h1 id="ForNode">ForNode</h1>
+<script>
+Diagram(Choice(0, Sequence(Terminal("("), Terminal("for"), Terminal("["), NonTerminal("SymbolNode", {href:"#SymbolNode"}), Terminal("="), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), Terminal(":"), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), Terminal(":"), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), Terminal("]"), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), Terminal(")")))).addTo();
+</script>
+
+<h1 id="RangeNode">RangeNode</h1>
+<script>
+Diagram(Choice(0, Sequence(Terminal("("), Terminal("range"), Terminal("["), NonTerminal("SymbolNode", {href:"#SymbolNode"}), Terminal(":"), NonTerminal("IterableUnionNode", {href:"#IterableUnionNode"}), Terminal("]"), NonTerminal("ExpressionUnionNode", {href:"#ExpressionUnionNode"}), Terminal(")")))).addTo();
+</script>
+
+<h1 id="IterableUnionNode">IterableUnionNode</h1>
+<script>
+Diagram(Choice(0, Sequence(NonTerminal("ListNode", {href:"#ListNode"})), Sequence(NonTerminal("SymbolNode", {href:"#SymbolNode"})), Sequence(NonTerminal("CallNode", {href:"#CallNode"})))).addTo();
 </script>
 
 <h1 id="CallNode">CallNode</h1>
