@@ -36,6 +36,9 @@ var (
 		"Root": []lexer.Rule{
 			{Name: "wspace", Pattern: `[ \r\t\n]+`},
 
+			{Name: "Defn", Pattern: `defn`},
+			{Name: "Defc", Pattern: `defc`},
+			{Name: "Defr", Pattern: `defr`},
 			{Name: "Def", Pattern: `def`},
 			{Name: "Set", Pattern: `var`},
 			{Name: "Var", Pattern: `set`},
@@ -76,6 +79,7 @@ var (
 			{Name: "=", Pattern: `=`},
 			{Name: "|", Pattern: `\|`},
 			{Name: "&", Pattern: `&`},
+			{Name: "::", Pattern: `:`},
 			{Name: ":", Pattern: `:`},
 			{Name: "(", Pattern: `\(`},
 			{Name: ")", Pattern: `\)`},
@@ -91,12 +95,15 @@ var (
 	})
 	Parser = participle.MustBuild[ModuleNode](
 		participle.Lexer(Lexer),
-		participle.UseLookahead(4),
+		participle.UseLookahead(6),
 		participle.Union[ModuleUnionNode](
 			&FnNode{},
 			&ConstNode{},
+			&RecordNode{},
 		),
 		participle.Union[ConstantUnionNode](
+			&ListNode{},
+			&RecordConstructorNode{},
 			&IntegerNode{},
 			&FloatNode{},
 			&BoolNode{},
@@ -117,17 +124,17 @@ var (
 			&CallNode{},
 		),
 		participle.Union[DatatypeUnionNode](
-			&SymbolSeqNode{},
 			&PrimitiveNode{},
 			&CompositeNode{},
 			&RecordTypeNode{},
 			&FnTypeNode{},
+			&SymbolSeqNode{},
+			&SymbolNode{},
 		),
 		participle.Union[ExpressionUnionNode](
 			&OperationNode{},
 			&ListNode{},
-			&SymbolSeqNode{},
-			&SymbolNode{},
+			&RecordConstructorNode{},
 			&IntegerNode{},
 			&FloatNode{},
 			&BoolNode{},
@@ -140,6 +147,8 @@ var (
 			&ForNode{},
 			&RangeNode{},
 			&CallNode{},
+			&SymbolSeqNode{},
+			&SymbolNode{},
 		),
 		participle.Union[IterableUnionNode](
 			&ListNode{},
@@ -147,9 +156,13 @@ var (
 			&CallNode{},
 		),
 		participle.Union[CallableUnionNode](
+			&LambdaNode{},
 			&SymbolSeqNode{},
 			&SymbolNode{},
-			&LambdaNode{},
+		),
+		participle.Union[SymbolUnionNode](
+			&SymbolSeqNode{},
+			&SymbolNode{},
 		),
 	)
 )
@@ -166,6 +179,7 @@ type (
 	ConstantUnionNode   interface{ Node }
 	IterableUnionNode   interface{ Node }
 	CallableUnionNode   interface{ Node }
+	SymbolUnionNode     interface{ Node }
 	_node               struct {
 		Pos lexer.Position
 	}
@@ -226,15 +240,21 @@ type (
 	}
 	FnNode struct {
 		_node
-		Identifier *SymbolNode   `parser:"'(' 'def' @@"`
+		Identifier *SymbolNode   `parser:"'(' 'defn' @@"`
 		Fns        []*LambdaNode `parser:"@@+ ')'"`
 		Types      []*FunctionType
 	}
 	ConstNode struct {
 		_node
-		Identifier   *SymbolNode       `parser:"'(' 'def' @@"`
+		Identifier   *SymbolNode       `parser:"'(' 'defc' @@"`
 		Constant     ConstantUnionNode `parser:"@@ ')'"`
 		ConstantType Type
+	}
+	RecordNode struct {
+		_node
+		Identifier *SymbolNode     `parser:"'(' 'defr' @@"`
+		Record     *RecordTypeNode `parser:"@@ ')'"`
+		Type       Type
 	}
 	CallNode struct {
 		_node
@@ -252,6 +272,7 @@ type (
 	RecordTypeNode struct {
 		_node
 		Fields []*InputNode `parser:"'(' 'record' @@+ ')'"`
+		Env    Enviroment
 	}
 	SetNode struct {
 		_node
@@ -299,8 +320,8 @@ type (
 	}
 	SymbolSeqNode struct {
 		_node
-		Primary *SymbolNode `parser:"@@"`
-		Next    *SymbolNode `parser:"'/' @@"`
+		Primary *SymbolNode     `parser:"@@"`
+		Next    SymbolUnionNode `parser:"'/' @@"`
 	}
 	IntegerNode struct {
 		_node
@@ -326,6 +347,16 @@ type (
 		_node
 		SubType DatatypeUnionNode     `parser:"'list' '<' @@ '>'"`
 		Items   []ExpressionUnionNode `parser:"'{' @@* '}'"`
+	}
+	RecordConstructorNode struct {
+		_node
+		RecordName SymbolUnionNode `parser:"@@ '{'"`
+		Fields     []struct {
+			_node
+			Ident *SymbolNode         `parser:"@@"`
+			Value ExpressionUnionNode `parser:"':' @@"`
+		} `parser:"@@+'}'"`
+		Env Enviroment
 	}
 )
 
@@ -385,6 +416,12 @@ func InspectNode(node Node) string {
 		return "range_node"
 	case *ForNode:
 		return "for_node"
+	case *RecordNode:
+		return "record_node"
+	case *RecordTypeNode:
+		return "record_type_node"
+	case *RecordConstructorNode:
+		return "record_constructor_node"
 	default:
 		return "invalid_node"
 	}
@@ -539,6 +576,10 @@ type (
 		_value
 		Items []Value
 	}
+	RecordValue struct {
+		_value
+		Fields *Enviroment
+	}
 )
 
 func (_value) value() {}
@@ -561,6 +602,12 @@ func InspectValue(value Value) string {
 			items = append(items, InspectValue(item))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(items, " "))
+	case RecordValue:
+		fields := []string{}
+		for _, field := range value.Fields.Symbols {
+			fields = append(fields, InspectSymbol(field))
+		}
+		return fmt.Sprintf("#{%s}", strings.Join(fields, " "))
 	case BuiltinFuncValue:
 		return "builtin_fn"
 	case FuncValue:
@@ -572,18 +619,26 @@ func InspectValue(value Value) string {
 	}
 }
 
-func ValueToList(value Value) (ListValue, error) {
-	val, ok := value.(ListValue)
-	if !ok {
-		return ListValue{}, fmt.Errorf("can't convert value to list")
-	}
-	return val, nil
-}
-
 func ValueToUnit(value Value) (UnitValue, error) {
 	val, ok := value.(UnitValue)
 	if !ok {
 		return UnitValue{}, fmt.Errorf("can't convert value to unit")
+	}
+	return val, nil
+}
+
+func ValueToRecord(value Value) (RecordValue, error) {
+	val, ok := value.(RecordValue)
+	if !ok {
+		return RecordValue{}, fmt.Errorf("can't convert value to record")
+	}
+	return val, nil
+}
+
+func ValueToList(value Value) (ListValue, error) {
+	val, ok := value.(ListValue)
+	if !ok {
+		return ListValue{}, fmt.Errorf("can't convert value to list")
 	}
 	return val, nil
 }
@@ -694,6 +749,11 @@ type (
 		_type
 		Subtype Type
 	}
+	RecordType struct {
+		_type
+		Fields     []Type
+		Enviroment Enviroment
+	}
 )
 
 func (*_type) tp() {}
@@ -740,6 +800,12 @@ func InspectType(typ Type) string {
 			return fns[0]
 		}
 		return fmt.Sprintf("{%s}", strings.Join(fns, " "))
+	case *RecordType:
+		fields := []string{}
+		for _, field := range typ.Fields {
+			fields = append(fields, InspectType(field))
+		}
+		return fmt.Sprintf("#{%s}", strings.Join(fields, " "))
 	case *ListType:
 		return fmt.Sprintf("list<%s>", InspectType(typ.Subtype))
 	default:
@@ -808,6 +874,13 @@ func IsListType(a Type) bool {
 
 func IsCompType(a Type) bool {
 	if _, ok := a.(*CompType); ok {
+		return true
+	}
+	return false
+}
+
+func IsRecord(a Type) bool {
+	if _, ok := a.(*RecordType); ok {
 		return true
 	}
 	return false
@@ -961,6 +1034,76 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
 		return types["unit"], nil
+	case *RecordNode:
+		if !env.IsCollecting {
+			typ, err := TypeCheck(env, node.Record)
+			if err != nil {
+				return nil, err
+			}
+			sm, err := env.Lookup(node.Identifier.Value)
+			if err != nil {
+				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+			}
+			smTyp := sm.Type.(*RecordType)
+			recTyp := typ.(*RecordType)
+			smTyp.Fields = recTyp.Fields
+			smTyp.Enviroment = recTyp.Enviroment
+			return types["unit"], nil
+		}
+		err := env.Insert(
+			&Symbol{
+				Ident: node.Identifier,
+				Type:  &RecordType{},
+				Value: UnitValue{},
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return types["unit"], nil
+	case *RecordTypeNode:
+		recEnv := NewEnviroment("rec", env)
+		fields := []Type{}
+		for _, field := range node.Fields {
+			fieldType, err := TypeCheck(recEnv, field)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, fieldType)
+		}
+		return &RecordType{
+			Fields:     fields,
+			Enviroment: *recEnv,
+		}, nil
+	case *RecordConstructorNode:
+		typ, err := TypeCheck(env, node.RecordName)
+		if err != nil {
+			return nil, err
+		}
+		if !IsRecord(typ) {
+			return nil, fmt.Errorf("%s -> expect record type", node.Position())
+		}
+		recTyp := typ.(*RecordType)
+		recEnv := NewEnviroment("rec", env)
+		recEnv.CloneSymbols(&recTyp.Enviroment)
+		if len(node.Fields) != len(recTyp.Enviroment.Symbols) {
+			return nil, fmt.Errorf("%s -> record constructor expect initialization of all fields", node.Position())
+		}
+		for _, field := range node.Fields {
+			sm, err := recEnv.Lookup(field.Ident.Value)
+			if err != nil {
+				return nil, fmt.Errorf("%s -> %w", field.Position(), err)
+			}
+			valTyp, err := TypeCheck(recEnv, field.Value)
+			if err != nil {
+				return nil, err
+			}
+			if !CompareTypes(sm.Type, valTyp) {
+				return nil, fmt.Errorf("%s -> field expect %s, got %s", field.Position(), InspectType(sm.Type), InspectType(valTyp))
+			}
+		}
+		node.Env = *recEnv
+		return typ, nil
 	case *IntegerNode:
 		return types["int"], nil
 	case *FloatNode:
@@ -1042,10 +1185,16 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
-		if sm.Env == nil {
-			return nil, fmt.Errorf("%s -> can't get symbol from %s", node.Position(), InspectSymbol(sm))
+		if IsRecord(sm.Type) {
+			recTyp := sm.Type.(*RecordType)
+			recEnv := NewEnviroment(sm.Ident.Value, env)
+			recEnv.CloneSymbols(&recTyp.Enviroment)
+			return TypeCheck(recEnv, node.Next)
 		}
-		return TypeCheck(sm.Env, node.Next)
+		if sm.Env != nil {
+			return TypeCheck(sm.Env, node.Next)
+		}
+		return nil, fmt.Errorf("%s -> can't get symbol from %s", node.Position(), InspectSymbol(sm))
 	case *InputNode:
 		typ, err := TypeCheck(env, node.Datatype)
 		if err != nil {
@@ -1477,6 +1626,23 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		return ListValue{
 			Items: items,
 		}, nil
+	case *RecordConstructorNode:
+		recEnv := NewEnviroment("rec", env)
+		recEnv.CloneSymbols(&node.Env)
+		for _, field := range node.Fields {
+			sm, err := recEnv.Lookup(field.Ident.Value)
+			if err != nil {
+				return nil, fmt.Errorf("%s -> %w", field.Position(), err)
+			}
+			val, err := Eval(recEnv, field.Value)
+			if err != nil {
+				return nil, err
+			}
+			sm.Value = val
+		}
+		return RecordValue{
+			Fields: recEnv,
+		}, nil
 	case *SymbolNode:
 		sm, err := env.LookupAll(node.Value)
 		if err != nil {
@@ -1487,6 +1653,10 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		sm, err := env.LookupAll(node.Primary.Value)
 		if err != nil {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		if IsRecord(sm.Type) {
+			recVal, _ := ValueToRecord(sm.Value)
+			return Eval(recVal.Fields, node.Next)
 		}
 		return Eval(sm.Env, node.Next)
 	case *SetNode:
@@ -2220,8 +2390,7 @@ func ConcatString(operands ...StringValue) StringValue {
 	return StringValue{Value: builder.String()}
 }
 
-func InsertBuiltinSymbols(env *Enviroment) {
-}
+func InsertBuiltinSymbols(env *Enviroment) {}
 
 func InsertIOSymbols(parent *Enviroment) {
 	env := NewEnviroment("io", parent)
@@ -2229,6 +2398,7 @@ func InsertIOSymbols(parent *Enviroment) {
 		&Symbol{
 			Ident:    &SymbolNode{Value: "io"},
 			IsImport: true,
+			Value:    UnitValue{},
 			Env:      env,
 		},
 	)
@@ -2273,6 +2443,7 @@ func InsertFloatsSymbols(parent *Enviroment) {
 		&Symbol{
 			Ident:    &SymbolNode{Value: "floats"},
 			IsImport: true,
+			Value:    UnitValue{},
 			Env:      env,
 		},
 	)
@@ -2306,6 +2477,7 @@ func InsertIntsSymbols(parent *Enviroment) {
 		&Symbol{
 			Ident:    &SymbolNode{Value: "ints"},
 			IsImport: true,
+			Value:    UnitValue{},
 			Env:      env,
 		},
 	)
@@ -2339,6 +2511,7 @@ func InsertListsSymbols(parent *Enviroment) {
 		&Symbol{
 			Ident:    &SymbolNode{Value: "lists"},
 			IsImport: true,
+			Value:    UnitValue{},
 			Env:      env,
 		},
 	)
