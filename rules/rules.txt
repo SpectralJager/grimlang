@@ -1,0 +1,33 @@
+ModuleNode = ModuleUnionNode+ .
+ModuleUnionNode = FnNode | ConstNode .
+FnNode = "(" "def" SymbolNode LambdaNode+ ")" .
+SymbolNode = <symbol> .
+LambdaNode = "(" "fn" ("[" InputNode+ "]")? "<" DatatypeUnionNode ">" ExpressionUnionNode ")" .
+InputNode = SymbolNode ":" DatatypeUnionNode .
+DatatypeUnionNode = PrimitiveNode | CompositeNode | FnTypeNode .
+PrimitiveNode = ("int" | "float" | "string" | "bool" | "unit") .
+CompositeNode = "list" "<" DatatypeUnionNode ">" .
+RecordTypeNode = "(" "record" InputNode+ ")" .
+FnTypeNode = "[" DatatypeUnionNode* "]" "<" DatatypeUnionNode ">" .
+ExpressionUnionNode = OperationNode | ListNode | SymbolNode | IntegerNode | FloatNode | BoolNode | StringNode | BlockNode | CondNode | CaseNode | LambdaNode | WhileNode | ForNode | RangeNode | CallNode .
+OperationNode = "(" ("+" | "-" | "*" | "/" | "<" | "=" | "<>" | ">" | "<=" | ">=" | "|" | "&" | "++") ExpressionUnionNode ExpressionUnionNode+ ")" .
+ListNode = "list" "<" DatatypeUnionNode ">" "{" ExpressionUnionNode* "}" .
+IntegerNode = <integer> .
+FloatNode = <float> .
+BoolNode = <boolean> .
+StringNode = <stringstart> <string> <stringend> .
+BlockNode = "{" BlockUnionNode+ "}" .
+BlockUnionNode = OperationNode | UnitNode | SymbolNode | CondNode | DefNode | VarNode | SetNode | WhileNode | ForNode | RangeNode | CallNode .
+UnitNode = "()" .
+CondNode = "(" "cond" CaseNode+ ExpressionUnionNode ")" .
+CaseNode = "(" "case" ExpressionUnionNode ExpressionUnionNode ")" .
+DefNode = "(" "def" SymbolNode ExpressionUnionNode ")" .
+VarNode = "(" "var" SymbolNode "=" ExpressionUnionNode ")" .
+SetNode = "(" "set" SymbolNode "=" ExpressionUnionNode ")" .
+WhileNode = "(" "while" ExpressionUnionNode ExpressionUnionNode ")" .
+ForNode = "(" "for" "[" SymbolNode "=" ExpressionUnionNode ":" ExpressionUnionNode ":" ExpressionUnionNode "]" ExpressionUnionNode ")" .
+RangeNode = "(" "range" "[" SymbolNode ":" IterableUnionNode "]" ExpressionUnionNode ")" .
+IterableUnionNode = ListNode | SymbolNode | CallNode .
+CallNode = "(" SymbolNode ExpressionUnionNode* ")" .
+ConstNode = "(" "def" SymbolNode ConstantUnionNode ")" .
+ConstantUnionNode = IntegerNode | FloatNode | BoolNode | StringNode .
