@@ -105,6 +105,7 @@ var (
 		participle.Union[BlockUnionNode](
 			&OperationNode{},
 			&UnitNode{},
+			&SymbolSeqNode{},
 			&SymbolNode{},
 			&CondNode{},
 			&DefNode{},
@@ -116,6 +117,7 @@ var (
 			&CallNode{},
 		),
 		participle.Union[DatatypeUnionNode](
+			&SymbolSeqNode{},
 			&PrimitiveNode{},
 			&CompositeNode{},
 			&RecordTypeNode{},
@@ -124,6 +126,7 @@ var (
 		participle.Union[ExpressionUnionNode](
 			&OperationNode{},
 			&ListNode{},
+			&SymbolSeqNode{},
 			&SymbolNode{},
 			&IntegerNode{},
 			&FloatNode{},
@@ -143,6 +146,11 @@ var (
 			&SymbolNode{},
 			&CallNode{},
 		),
+		participle.Union[CallableUnionNode](
+			&SymbolSeqNode{},
+			&SymbolNode{},
+			&LambdaNode{},
+		),
 	)
 )
 
@@ -157,6 +165,7 @@ type (
 	DatatypeUnionNode   interface{ Node }
 	ConstantUnionNode   interface{ Node }
 	IterableUnionNode   interface{ Node }
+	CallableUnionNode   interface{ Node }
 	_node               struct {
 		Pos lexer.Position
 	}
@@ -229,7 +238,7 @@ type (
 	}
 	CallNode struct {
 		_node
-		Callable   *SymbolNode           `parser:"'(' @@"`
+		Callable   CallableUnionNode     `parser:"'(' @@"`
 		Inputs     []ExpressionUnionNode `parser:" @@* ')'"`
 		ReturnType Type
 		PolyIndex  int
@@ -288,6 +297,11 @@ type (
 		_node
 		Value string `parser:"@Symbol"`
 	}
+	SymbolSeqNode struct {
+		_node
+		Primary *SymbolNode `parser:"@@"`
+		Next    *SymbolNode `parser:"'/' @@"`
+	}
 	IntegerNode struct {
 		_node
 		Value int `parser:"@Integer"`
@@ -335,6 +349,8 @@ func InspectNode(node Node) string {
 		return "string_node"
 	case *SymbolNode:
 		return "symbol_node"
+	case *SymbolSeqNode:
+		return "symbol_seq_node"
 	case *DefNode:
 		return "def_node"
 	case *VarNode:
@@ -463,6 +479,8 @@ type (
 		Value     Value
 		IsMutable bool
 		IsBuiltin bool
+		IsImport  bool
+		Env       *Enviroment
 	}
 )
 
@@ -472,6 +490,8 @@ func InspectSymbol(sm *Symbol) string {
 		return fmt.Sprintf("%s -> mut %s", sm.Ident.Value, InspectType(sm.Type))
 	case sm.IsBuiltin:
 		return fmt.Sprintf("%s -> builtin %s", sm.Ident.Value, InspectType(sm.Type))
+	case sm.IsImport:
+		return fmt.Sprintf("%s -> import", sm.Ident.Value)
 	default:
 		return fmt.Sprintf("%s -> %s", sm.Ident.Value, InspectType(sm.Type))
 	}
@@ -1017,6 +1037,15 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
 		return sm.Type, nil
+	case *SymbolSeqNode:
+		sm, err := env.LookupAll(node.Primary.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		if sm.Env == nil {
+			return nil, fmt.Errorf("%s -> can't get symbol from %s", node.Position(), InspectSymbol(sm))
+		}
+		return TypeCheck(sm.Env, node.Next)
 	case *InputNode:
 		typ, err := TypeCheck(env, node.Datatype)
 		if err != nil {
@@ -1454,6 +1483,12 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
 		}
 		return sm.Value, nil
+	case *SymbolSeqNode:
+		sm, err := env.LookupAll(node.Primary.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s -> %w", node.Position(), err)
+		}
+		return Eval(sm.Env, node.Next)
 	case *SetNode:
 		contVal, err := Eval(env, node.Content)
 		if err != nil {
@@ -2186,6 +2221,17 @@ func ConcatString(operands ...StringValue) StringValue {
 }
 
 func InsertBuiltinSymbols(env *Enviroment) {
+}
+
+func InsertIOSymbols(parent *Enviroment) {
+	env := NewEnviroment("io", parent)
+	parent.Insert(
+		&Symbol{
+			Ident:    &SymbolNode{Value: "io"},
+			IsImport: true,
+			Env:      env,
+		},
+	)
 	env.Insert(&Symbol{
 		Ident: &SymbolNode{Value: "println"},
 		Type: &FunctionType{
@@ -2209,29 +2255,29 @@ func InsertBuiltinSymbols(env *Enviroment) {
 		IsBuiltin: true,
 	})
 	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "itof"},
+		Ident: &SymbolNode{Value: "readFile"},
 		Type: &FunctionType{
-			Inputs: []Type{&IntegerType{}},
-			Output: &FloatType{},
-		},
-		Value: BuiltinFuncValue{
-			Fn: Itof,
-		},
-		IsBuiltin: true,
-	})
-	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "itos"},
-		Type: &FunctionType{
-			Inputs: []Type{&IntegerType{}},
+			Inputs: []Type{&StringType{}},
 			Output: &StringType{},
 		},
 		Value: BuiltinFuncValue{
-			Fn: Itos,
+			Fn: ReadFile,
 		},
 		IsBuiltin: true,
 	})
+}
+
+func InsertFloatsSymbols(parent *Enviroment) {
+	env := NewEnviroment("floats", parent)
+	parent.Insert(
+		&Symbol{
+			Ident:    &SymbolNode{Value: "floats"},
+			IsImport: true,
+			Env:      env,
+		},
+	)
 	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "ftoi"},
+		Ident: &SymbolNode{Value: "toInt"},
 		Type: &FunctionType{
 			Inputs: []Type{&FloatType{}},
 			Output: &IntegerType{},
@@ -2242,7 +2288,7 @@ func InsertBuiltinSymbols(env *Enviroment) {
 		IsBuiltin: true,
 	})
 	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "ftos"},
+		Ident: &SymbolNode{Value: "toString"},
 		Type: &FunctionType{
 			Inputs: []Type{&FloatType{}},
 			Output: &StringType{},
@@ -2252,8 +2298,52 @@ func InsertBuiltinSymbols(env *Enviroment) {
 		},
 		IsBuiltin: true,
 	})
+}
+
+func InsertIntsSymbols(parent *Enviroment) {
+	env := NewEnviroment("ints", parent)
+	parent.Insert(
+		&Symbol{
+			Ident:    &SymbolNode{Value: "ints"},
+			IsImport: true,
+			Env:      env,
+		},
+	)
 	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "ltos"},
+		Ident: &SymbolNode{Value: "toFloat"},
+		Type: &FunctionType{
+			Inputs: []Type{&IntegerType{}},
+			Output: &FloatType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Itof,
+		},
+		IsBuiltin: true,
+	})
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "toString"},
+		Type: &FunctionType{
+			Inputs: []Type{&IntegerType{}},
+			Output: &StringType{},
+		},
+		Value: BuiltinFuncValue{
+			Fn: Itos,
+		},
+		IsBuiltin: true,
+	})
+}
+
+func InsertListsSymbols(parent *Enviroment) {
+	env := NewEnviroment("lists", parent)
+	parent.Insert(
+		&Symbol{
+			Ident:    &SymbolNode{Value: "lists"},
+			IsImport: true,
+			Env:      env,
+		},
+	)
+	env.Insert(&Symbol{
+		Ident: &SymbolNode{Value: "toString"},
 		Type: &FunctionType{
 			Inputs: []Type{&ListType{Subtype: &CompType{}}},
 			Output: &StringType{},
@@ -2264,7 +2354,7 @@ func InsertBuiltinSymbols(env *Enviroment) {
 		IsBuiltin: true,
 	})
 	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "llen"},
+		Ident: &SymbolNode{Value: "len"},
 		Type: &FunctionType{
 			Inputs: []Type{&ListType{Subtype: &CompType{}}},
 			Output: &IntegerType{},
@@ -2275,24 +2365,13 @@ func InsertBuiltinSymbols(env *Enviroment) {
 		IsBuiltin: true,
 	})
 	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "lappend"},
+		Ident: &SymbolNode{Value: "append"},
 		Type: &FunctionType{
 			Inputs: []Type{&ListType{Subtype: &CompType{}}, &CompType{}},
 			Output: &ListType{Subtype: &CompType{}},
 		},
 		Value: BuiltinFuncValue{
 			Fn: Lappend,
-		},
-		IsBuiltin: true,
-	})
-	env.Insert(&Symbol{
-		Ident: &SymbolNode{Value: "readFile"},
-		Type: &FunctionType{
-			Inputs: []Type{&StringType{}},
-			Output: &StringType{},
-		},
-		Value: BuiltinFuncValue{
-			Fn: ReadFile,
 		},
 		IsBuiltin: true,
 	})
