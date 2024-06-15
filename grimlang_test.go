@@ -1,4 +1,4 @@
-package main
+package grimlang
 
 import (
 	"bytes"
@@ -9,46 +9,10 @@ import (
 )
 
 const program = `
-(defn printPoint2d (fn [point:point2d] <unit>
-	(io/println (++
-		"x:"
-		(floats/toString point/x)
-		" y:"
-		(floats/toString point/y)
-	))
-))
-
 (defn main (fn <unit> {
-	(def point point2d{
-		x:12.2
-		y:0.0
-	})
-	(printPoint2d point)
-	(def vec vector{
-		p0:point{
-			x:0.0
-			y:0.0
-		}
-		p1:point{
-			x:0.0
-			y:0.0
-		}
-	})
-	(printPoint2d vec/p0)
-	(printPoint2d vec/p1)
-	(io/println (floats/toString vec/p0/x))
-	()
+	(def a "hello")	
+	(io/println a)
 }))
-(defr vector (record
-	p0: point2d	
-	p1: point2d	
-))
-
-(defr point2d (record 
-	x:float	
-	y:float
-))
-
 `
 
 func TestInterpreter(t *testing.T) {
