@@ -1,8 +1,8 @@
 # Grimlang
-Simple, imperative, general purpose programming language with strong type system and lisp-like syntax, writen in Golang.
+Simple, imperative, general purpose programming language with strong type system and lisp-like syntax, written in Golang.
 
 # Examples
-Hello world programm:
+Hello world program:
 ```Clojure
 (defn main (fn <unit>) (io/println "Hello, world!"))
 ```
@@ -40,9 +40,9 @@ List
 list<int>{1 2 3 4}
 list<string>{"h" "e" "l" "l" "o"}
 list<list<int>>{
-    list<int>{1 2}
-    list<int>{3 4}
-    list<int>{5 6}
+	list<int>{1 2}
+	list<int>{3 4}
+	list<int>{5 6}
 }
 ```
 
@@ -50,14 +50,14 @@ list<list<int>>{
 Record
 ```Clojure
 (defr point
-    x:float
-    y:float
-    z:float
+	x:float
+	y:float
+	z:float
 )
 
 # Language constructions
 ## Constants
-Immutable identifiers with binded value. Values can be simple constant litteral or expression. Can shadow identifiers from parent scope. Returns unit type.
+Immutable identifiers with binded values. Values can be simple constant literal or expression. Can shadow identifiers from parent scope. Returns unit type.
 
 Create new constant:
 ```Lisp
@@ -66,7 +66,7 @@ Create new constant:
 ```
 
 ## Variable
-Muatable identifiers with binded value. Values can be simple constant litteral or expression. Can shadow identifiers from parent scope. Returns unit type.
+Muatable identifiers with binded value. Values can be simple constant literal or expression. Can shadow identifiers from parent scope. Returns unit type.
 
 Create new variable:
 ```Lisp
@@ -79,20 +79,20 @@ Update variable with same value type:
 ```
 
 ## Block
-Create new local scope. Allows execute sequence of instructions. Block return value of last instruction. 
+Create new local scope. Allows execute sequence of instructions. Block return value of last instruction.
 
 Evaluate some expressions and return result:
 ```Lisp
 {
-    (def pi 3.14)
-    (def r 10.0)
-    (def area (* pi (* r r)))
-    area
+	(def pi 3.14)
+	(def r 10.0)
+	(def area (* pi (* r r)))
+	area
 }
 ```
 
 ## Operation
-Expression, that can take from 2 to 1024 arguments of the same type then return result of operation, ususally of the same type with arguments.
+Expression, that can take from 2 to 1024 arguments of the same type then return the result of operation, usually of the same type with arguments.
 
 Arithmetic expressions:
 ```Clojure
@@ -101,7 +101,7 @@ Arithmetic expressions:
 (- 20.0 18.3)
 ```
 
-Concatination:
+Concatenation:
 ```Clojure
 (++ "hello," " " "Alex!")
 ```
@@ -114,7 +114,7 @@ Logic expressions:
 ```
 
 ## Call expression
-Calling function with specific list of arguments then return result value.
+Calling a function with a specific list of arguments then returns the result value.
 ```Clojure
 (io/println "hello, world")
 ```
@@ -125,14 +125,14 @@ Calling lambda function:
 ```
 
 ## Condition control flow
-Allows create conditional execution of code. All cases should return value of the same type. Unlimited count of cases. Last argument of condition is else (default).
+Allows create conditional execution of code. All cases should return a value of the same type. Unlimited count of cases. Last argument of condition is else (default).
 
 ```Clojure
 (def n 10)
 (cond
-    (case (< 2 n 4) (io/println "2 < n < 4"))
-    (case (<= n 2) (io/println "n <= 2"))
-    (io/println "4 <= n")
+	(case (< 2 n 4) (io/println "2 < n < 4"))
+	(case (<= n 2) (io/println "n <= 2"))
+	(io/println "4 <= n")
 )
 ```
 
@@ -161,9 +161,9 @@ Loops as list generators:
 (def forLst (for [i = 0 : 10 : 2] i))
 (var n = 0)
 (def whileLst (while (< n 10) {
-    (def listItem n)
-    (set n = (+ n 1))
-    listItem
+	(def listItem n)
+	(set n = (+ n 1))
+	listItem
 }))
 (def rangeLst (range [item : forLst] (* item item)))
 ```
@@ -172,16 +172,16 @@ Loops as list generators:
 Global function definition. Allows create multiple function instances with the same name and different inputs.
 
 ```Clojure
-(defn printer 
-    (fn <unit> (io/println "Hello, World"))
-    (fn [msg:string] <unit> (io/println msg))
-    (fn [msg:int] <unit> (printer (ints/toString msg)))
+(defn printer
+	(fn <unit> (io/println "Hello, World"))
+	(fn [msg:string] <unit> (io/println msg))
+	(fn [msg:int] <unit> (printer (ints/toString msg)))
 )
 
 (defn main (fn <unit> {
-    (printer 10)
-    (printer "Hello, Alex")
-    ()
+	(printer 10)
+	(printer "Hello, Alex")
+	()
 }))
 ```
 
@@ -195,16 +195,16 @@ Global constant definition. As values can be used only primitive litterals.
 Global record type declaration.
 ```Clojure
 (defr point
-    x:float
-    y:float
-    z:float
+	x:float
+	y:float
+	z:float
 )
 ```
 
 
 # Resources
 ## Participle
-A parser library for Go 
+A parser library for Go
 ```
 go get github.com/alecthomas/participle/v2@latest
-```
+`
