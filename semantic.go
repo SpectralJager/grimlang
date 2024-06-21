@@ -5,25 +5,6 @@ import "fmt"
 func TypeCheck(env *Enviroment, node Node) (Type, error) {
 	switch node := node.(type) {
 	case *ModuleNode:
-		moduleEnv := NewEnviroment("module", env)
-		moduleEnv.Kind = GlobalEK
-		moduleEnv.IsCollecting = true
-		for _, content := range node.Body {
-			_, err := TypeCheck(moduleEnv, content)
-			if err != nil {
-				return nil, err
-			}
-		}
-		moduleEnv.IsCollecting = false
-		for _, content := range node.Body {
-			_, err := TypeCheck(moduleEnv, content)
-			if err != nil {
-				return nil, err
-			}
-		}
-		node.Env = *moduleEnv
-		// fmt.Println(moduleEnv.Inspect())
-		return types["unit"], nil
 	case *FnNode:
 		if !env.IsCollecting {
 			for _, fn := range node.Fns {
@@ -364,19 +345,6 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		}
 		return types["unit"], nil
 	case *BlockNode:
-		blockEnv := NewEnviroment("block", env)
-		for index, content := range node.Body {
-			typ, err := TypeCheck(blockEnv, content)
-			if err != nil {
-				return nil, err
-			}
-			if index == len(node.Body)-1 {
-				node.ReturnType = typ
-			}
-		}
-		node.Env = *blockEnv
-		// fmt.Println(blockEnv.Inspect())
-		return node.ReturnType, nil
 	case *CallNode:
 		typ, err := TypeCheck(env, node.Callable)
 		if err != nil {
@@ -539,39 +507,6 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 		node.Typ = &ListType{Subtype: contTyp}
 		return node.Typ, nil
 	case *OperationNode:
-		opTyp, err := TypeCheck(env, node.Operands[0])
-		if err != nil {
-			return nil, err
-		}
-		node.OperandsType = opTyp
-		switch node.Operation {
-		case "+", "-", "*", "/":
-			if !IsNumberType(opTyp) {
-				return nil, fmt.Errorf("%s -> can't use not number type in '%s' operation", node.Position(), node.Operation)
-			}
-			node.OperationType = opTyp
-			return TypeCheckOperatorOperands(env, node)
-		case "=", "<>", "<", ">", "<=", ">=":
-			if !IsComparableType(opTyp) {
-				return nil, fmt.Errorf("%s -> can't use not comparable type in '%s' operation", node.Position(), node.Operation)
-			}
-			node.OperationType = types["bool"]
-			return TypeCheckOperatorOperands(env, node)
-		case "|", "&":
-			if !IsBooleanType(opTyp) {
-				return nil, fmt.Errorf("%s -> can't use not boolean type in '%s' operation", node.Position(), node.Operation)
-			}
-			node.OperationType = opTyp
-			return TypeCheckOperatorOperands(env, node)
-		case "++":
-			if !IsStringType(opTyp) {
-				return nil, fmt.Errorf("%s -> can't use not string type in '%s' operation", node.Position(), node.Operation)
-			}
-			node.OperationType = opTyp
-			return TypeCheckOperatorOperands(env, node)
-		default:
-			return nil, fmt.Errorf("%s -> unexpected operation '%s'", node.Position(), node.Operation)
-		}
 	default:
 		return nil, fmt.Errorf("%s -> can't check unexpected node '%s'", node.Position(), InspectNode(node))
 	}

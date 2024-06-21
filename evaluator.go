@@ -5,17 +5,6 @@ import "fmt"
 func Eval(env *Enviroment, node Node) (Value, error) {
 	switch node := node.(type) {
 	case *ModuleNode:
-		moduleEnv := node.Env
-		moduleEnv.Kind = GlobalEK
-		_, err := Eval(&moduleEnv, &CallNode{
-			Callable: &SymbolNode{
-				Value: "main",
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		return UnitValue{}, nil
 	case *UnitNode:
 		return UnitValue{}, nil
 	case *IntegerNode:
@@ -118,19 +107,6 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		sm.Value = val
 		return UnitValue{}, nil
 	case *BlockNode:
-		blockEnv := NewEnviroment("block", env)
-		blockEnv.CloneSymbols(&node.Env)
-		retVal := Value(UnitValue{})
-		for index, content := range node.Body {
-			val, err := Eval(blockEnv, content)
-			if err != nil {
-				return nil, err
-			}
-			if index == len(node.Body)-1 {
-				retVal = val
-			}
-		}
-		return retVal, nil
 	case *LambdaNode:
 		return FuncValue{
 			Inputs:  node.Inputs,
@@ -320,112 +296,6 @@ func Eval(env *Enviroment, node Node) (Value, error) {
 		}
 		return UnitValue{}, nil
 	case *OperationNode:
-		operands := []Value{}
-		for _, operand := range node.Operands {
-			val, err := Eval(env, operand)
-			if err != nil {
-				return nil, err
-			}
-			operands = append(operands, val)
-		}
-		switch typ := node.OperandsType.(type) {
-		case *IntegerType:
-			values, err := ValuesToInteger(operands...)
-			if err != nil {
-				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
-			}
-			switch node.Operation {
-			case "+":
-				return AddInt(values...), nil
-			case "-":
-				return SubInt(values...), nil
-			case "*":
-				return MulInt(values...), nil
-			case "/":
-				return DivInt(values...), nil
-			case "<":
-				return LessInt(values...), nil
-			case ">":
-				return GreaterInt(values...), nil
-			case "=":
-				return EqualInt(values...), nil
-			case "<>":
-				return NeqInt(values...), nil
-			case "<=":
-				return LeqInt(values...), nil
-			case ">=":
-				return GeqInt(values...), nil
-			default:
-				return nil, fmt.Errorf("%s -> unexpected operation '%s' for 'int' type", node.Position(), node.Operation)
-			}
-		case *FloatType:
-			values, err := ValuesToFloat(operands...)
-			if err != nil {
-				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
-			}
-			switch node.Operation {
-			case "+":
-				return AddFloat(values...), nil
-			case "-":
-				return SubFloat(values...), nil
-			case "*":
-				return MulFloat(values...), nil
-			case "/":
-				return DivFloat(values...), nil
-			case "<":
-				return LessFloat(values...), nil
-			case ">":
-				return GreaterFloat(values...), nil
-			case "=":
-				return EqualFloat(values...), nil
-			case "<>":
-				return NeqFloat(values...), nil
-			case "<=":
-				return LeqFloat(values...), nil
-			case ">=":
-				return GeqFloat(values...), nil
-			default:
-				return nil, fmt.Errorf("%s -> unexpected operation '%s' for 'float' type", node.Position(), node.Operation)
-			}
-		case *BoolType:
-			values, err := ValuesToBool(operands...)
-			if err != nil {
-				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
-			}
-			switch node.Operation {
-			case "=":
-				return EqualBool(values...), nil
-			case "<>":
-				return NeqBool(values...), nil
-			case "|":
-				return OrBool(values...), nil
-			case "&":
-				return AndBool(values...), nil
-			default:
-				return nil, fmt.Errorf("%s -> unexpected operation '%s' for 'bool' type", node.Position(), node.Operation)
-			}
-		case *StringType:
-			values, err := ValuesToString(operands...)
-			if err != nil {
-				return nil, fmt.Errorf("%s -> %w", node.Position(), err)
-			}
-			switch node.Operation {
-			case "=":
-				return EqualString(values...), nil
-			case "<>":
-				return NeqString(values...), nil
-			case "++":
-				return ConcatString(values...), nil
-			default:
-				return nil, fmt.Errorf("%s -> unexpected operation '%s' for 'string' type", node.Position(), node.Operation)
-			}
-		default:
-			return nil, fmt.Errorf("%s -> unexpected '%s' operation type '%s'",
-				node.Position(),
-				node.Operation,
-				InspectType(typ),
-			)
-		}
 	default:
 		return nil, fmt.Errorf("%s -> can't evaluate unexpected node '%s'", node.Position(), InspectNode(node))
 	}
