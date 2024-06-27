@@ -513,22 +513,6 @@ func TypeCheck(env *Enviroment, node Node) (Type, error) {
 }
 
 func TypeCheckOperatorOperands(env *Enviroment, node *OperationNode) (Type, error) {
-	for index, operand := range node.Operands {
-		typ, err := TypeCheck(env, operand)
-		if err != nil {
-			return nil, err
-		}
-		if !CompareTypes(node.OperandsType, typ) {
-			return nil, fmt.Errorf(
-				"%s -> operands should be same type '%s', #%d got '%s'",
-				operand.Position(),
-				InspectType(node.OperationType),
-				index,
-				InspectType(typ),
-			)
-		}
-	}
-	return node.OperationType, nil
 }
 
 func CallFuncCheck(env *Enviroment, fnTyp *FunctionType, node *CallNode) (Type, error) {
